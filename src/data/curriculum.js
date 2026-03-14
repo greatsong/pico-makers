@@ -224,6 +224,13 @@ export const CURRICULUM = {
     },
   },
   courseB: {
+    wifiTips: [
+      'Pico W는 2.4GHz WiFi만 지원합니다 (5GHz 연결 불가). 공유기 설정에서 2.4GHz 대역을 확인하세요.',
+      '학교 WiFi(기업용 인증)가 안 되면 핸드폰 핫스팟을 사용하세요. 핫스팟 설정에서 2.4GHz로 변경해야 합니다.',
+      'SSID와 비밀번호를 정확히 입력하세요. 대소문자를 구분하며, 공백도 포함됩니다.',
+      'WiFi 연결 실패 시: (1) SSID/비밀번호 재확인 (2) Pico 재부팅 (3) 공유기와 가까이 이동 (4) 핫스팟으로 전환',
+      '교실에서 여러 Pico가 동시에 연결되면 공유기 부하가 생길 수 있습니다. 순차적으로 연결하세요.',
+    ],
     lv1: {
       id: 'course-b-lv1', title: '탐험가', level: 1,
       sensors: 1, hours: 3, focus: '단일센서 대시보드',
@@ -736,7 +743,7 @@ plt.show()
         title: 'Google Sheets 연동',
         desc: 'WiFi로 Google Sheets에 자동 기록 — 어디서든 데이터 확인',
         icon: '📊',
-        setupGuide: '## Google Sheets 연동 설정\n\n### 1단계: Google Apps Script 만들기\n1. Google Drive에서 새 스프레드시트 생성\n2. 확장 프로그램 → Apps Script 클릭\n3. 아래 코드를 붙여넣고 "배포" → "새 배포"\n4. 유형: "웹 앱", 접근: "누구나" 선택\n5. 배포 URL을 복사하세요',
+        setupGuide: '## Google Sheets 연동 설정\n\n### 1단계: Apps Script 프로젝트 만들기\n1. Google Drive 접속 (drive.google.com)\n2. 좌측 상단 "새로 만들기" → "더보기" → "Google Apps Script" 클릭\n   (※ "더보기"를 눌러야 Apps Script가 보입니다)\n3. 프로젝트 이름을 "센서데이터수집"으로 변경\n\n### 2단계: 코드 붙여넣기\n1. 기본으로 있는 function myFunction() { } 코드를 **전체 삭제**\n2. 아래 Apps Script 코드를 **전체 복사하여 붙여넣기**\n3. Ctrl+S (또는 Cmd+S)로 저장\n\n### 3단계: 웹 앱으로 배포\n1. 상단 메뉴 "배포" → "새 배포" 클릭\n2. 톱니바퀴 아이콘 → "웹 앱" 선택\n3. 설명: "센서 데이터 수집" 입력\n4. 실행 주체: "나" (본인 계정)\n5. 액세스 권한: **"모든 사용자"** 선택 (중요!)\n6. "배포" 버튼 클릭\n\n### 4단계: 권한 승인 (처음 1회)\n1. "액세스 승인" 버튼 클릭\n2. Google 계정 선택\n3. ⚠️ "확인되지 않은 앱" 경고가 나타남\n4. 좌측 하단 "고급" 클릭\n5. "센서데이터수집(으)로 이동 (안전하지 않음)" 클릭\n6. "허용" 버튼 클릭\n\n### 5단계: URL 복사\n1. 배포 완료 화면에서 **웹 앱 URL**을 복사\n2. Pico 코드의 SHEET_URL = "여기에_붙여넣기"\n3. URL은 https://script.google.com/macros/s/...../exec 형태입니다\n\n💡 코드를 수정하면 "배포 관리" → "새 버전"으로 재배포해야 반영됩니다',
         appsScriptCode: `function doPost(e) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   var data = JSON.parse(e.postData.contents);
@@ -774,9 +781,17 @@ wlan.active(True)
 wlan.connect(SSID, PASSWORD)
 
 print("WiFi 연결 중...")
-while not wlan.isconnected():
+# WiFi 연결 (최대 20초)
+timeout = 40
+while not wlan.isconnected() and timeout > 0:
     time.sleep(0.5)
-print("WiFi 연결 완료:", wlan.ifconfig()[0])
+    timeout -= 1
+
+if not wlan.isconnected():
+    print("WiFi 연결 실패! SSID/비밀번호를 확인하세요")
+    # 오프라인 모드로 전환
+else:
+    print("WiFi 연결 완료:", wlan.ifconfig()[0])
 
 def send_to_sheets(data_dict):
     """Google Sheets에 데이터 전송"""
@@ -1465,7 +1480,7 @@ plt.show()
         title: 'WiFi 실시간 통신',
         desc: 'WiFi로 PC/노트북 서버에 실시간 전송 — USB 케이블 없이 무선 모니터링',
         icon: '📡',
-        setupGuide: '## WiFi 실시간 서버 설정\n\n### PC에서 Flask 서버 실행\n1. pip install flask flask-cors\n2. 아래 서버 코드를 server.py로 저장\n3. python server.py 실행\n4. 터미널에 표시되는 IP 주소를 Pico 코드에 입력',
+        setupGuide: '## WiFi 실시간 서버 설정\n\n### 1단계: Python 설치 확인\n1. PC에 Python이 설치되어 있는지 확인\n   - 터미널(또는 명령 프롬프트)에서: python --version\n   - 설치 안 됐으면: python.org에서 다운로드 (3.8 이상)\n   - Windows: 설치 시 "Add to PATH" 체크 필수!\n\n### 2단계: 라이브러리 설치\n1. 터미널(또는 명령 프롬프트)을 열고:\n   pip install flask flask-cors\n2. 설치 확인: pip list | grep flask\n\n### 3단계: 서버 실행\n1. 아래 서버 코드를 server.py 파일로 저장\n2. 터미널에서 저장한 폴더로 이동\n3. python server.py 실행\n4. "Running on http://0.0.0.0:5000" 메시지가 나오면 성공!\n\n### 4단계: PC의 IP 주소 확인\n- Windows: 명령 프롬프트 → ipconfig → "IPv4 주소" 확인 (예: 192.168.0.100)\n- Mac: 시스템 설정 → Wi-Fi → 세부사항 → IP 주소 확인\n- Linux: 터미널 → ip addr 또는 ifconfig\n\n### 5단계: Pico 코드에 IP 입력\n1. Pico 코드의 SERVER = "http://여기에_PC_IP:5000"\n2. 예: SERVER = "http://192.168.0.100:5000"\n3. Pico와 PC가 **같은 WiFi 네트워크**에 연결되어야 합니다!\n\n⚠️ 방화벽이 5000번 포트를 차단할 수 있습니다.\n   → Windows: 방화벽 설정에서 Python 허용\n   → Mac: 보안 팝업에서 "허용" 클릭',
         serverCode: `# server.py — PC 실시간 데이터 수신 서버
 # pip install flask flask-cors
 
@@ -1572,9 +1587,17 @@ wlan.active(True)
 wlan.connect(SSID, PASSWORD)
 
 print("WiFi 연결 중...")
-while not wlan.isconnected():
+# WiFi 연결 (최대 20초)
+timeout = 40
+while not wlan.isconnected() and timeout > 0:
     time.sleep(0.5)
-print("WiFi 연결 완료:", wlan.ifconfig()[0])
+    timeout -= 1
+
+if not wlan.isconnected():
+    print("WiFi 연결 실패! SSID/비밀번호를 확인하세요")
+    # 오프라인 모드로 전환
+else:
+    print("WiFi 연결 완료:", wlan.ifconfig()[0])
 
 send_count = 0
 
@@ -2119,7 +2142,7 @@ plt.show()`,
         title: 'Supabase 클라우드',
         desc: '클라우드 DB에 실시간 저장 — 전시 대시보드와 연동',
         icon: '☁️',
-        setupGuide: '## Supabase 클라우드 설정\n\n### 1단계: Supabase 프로젝트 생성\n1. supabase.com에 가입 (무료)\n2. New Project 생성\n3. Settings → API에서 URL과 anon key 복사\n\n### 2단계: 테이블 생성\nSQL Editor에서:\n\nCREATE TABLE sensor_data (\n  id BIGSERIAL PRIMARY KEY,\n  created_at TIMESTAMPTZ DEFAULT NOW(),\n  device_id TEXT DEFAULT \'pico-01\',\n  temp REAL,\n  humi REAL,\n  co2 INTEGER,\n  light REAL,\n  sound REAL,\n  dust REAL,\n  extra JSONB\n);\n\n-- 실시간 구독 활성화\nALTER TABLE sensor_data REPLICA IDENTITY FULL;\n\n### 3단계: 보안\n- Row Level Security (RLS) 활성화\n- INSERT 정책 추가: anon 역할 허용\n- SELECT 정책 추가: anon 역할 허용\n\n⚠️ anon key는 읽기/쓰기용 공개 키입니다. 비밀번호가 아닙니다.',
+        setupGuide: '## Supabase 클라우드 설정\n\n### 1단계: Supabase 가입\n1. supabase.com 접속\n2. "Start your project" 클릭\n3. GitHub 계정 또는 이메일로 가입 (무료)\n\n### 2단계: 새 프로젝트 생성\n1. 대시보드에서 "New Project" 클릭\n2. 프로젝트 이름: "sensor-dashboard" (원하는 이름)\n3. Database Password: 안전한 비밀번호 설정 (메모해두세요!)\n4. Region: **Northeast Asia (Tokyo)** 선택 (한국에서 가장 빠름)\n5. "Create new project" 클릭 → 2~3분 대기\n\n### 3단계: 테이블 생성\n1. 좌측 메뉴 "SQL Editor" 클릭\n2. "New query" 클릭\n3. 아래 SQL을 붙여넣고 "Run" 클릭:\n\nCREATE TABLE sensor_data (\n  id BIGSERIAL PRIMARY KEY,\n  created_at TIMESTAMPTZ DEFAULT NOW(),\n  device_id TEXT DEFAULT \'pico-01\',\n  temp REAL,\n  humi REAL,\n  co2 INTEGER,\n  light REAL,\n  sound REAL,\n  dust REAL,\n  extra JSONB\n);\n\nALTER TABLE sensor_data REPLICA IDENTITY FULL;\n\n### 4단계: API 키 복사\n1. 좌측 메뉴 맨 아래 "Project Settings" (톱니바퀴) 클릭\n2. "API" 메뉴 클릭\n3. **Project URL** 복사 → Pico 코드의 SUPABASE_URL에 붙여넣기\n4. **anon public** 키 복사 → Pico 코드의 SUPABASE_KEY에 붙여넣기\n   (⚠️ service_role 키는 절대 사용하지 마세요!)\n\n### 5단계: 보안 정책 (RLS) 설정\n1. SQL Editor에서 새 쿼리 실행:\n\nALTER TABLE sensor_data ENABLE ROW LEVEL SECURITY;\n\nCREATE POLICY "Pico에서 데이터 삽입 허용"\n  ON sensor_data FOR INSERT\n  TO anon WITH CHECK (true);\n\nCREATE POLICY "누구나 데이터 읽기 허용"\n  ON sensor_data FOR SELECT\n  TO anon USING (true);\n\n### 6단계: Pico 코드에 붙여넣기\n1. SUPABASE_URL = "https://여기에프로젝트ID.supabase.co"\n2. SUPABASE_KEY = "여기에_anon_key"\n3. 두 값 모두 따옴표 안에 정확히 붙여넣기\n\n💡 anon key는 공개용 키입니다. 비밀번호가 아니므로 코드에 포함해도 됩니다.\n💡 데이터 확인: 좌측 "Table Editor" → sensor_data 테이블 클릭',
         picoTemplate: `# ── WiFi + Supabase 연결 ──
 import network
 import urequests
@@ -2137,9 +2160,17 @@ wlan.active(True)
 wlan.connect(SSID, PASSWORD)
 
 print("WiFi 연결 중...")
-while not wlan.isconnected():
+# WiFi 연결 (최대 20초)
+timeout = 40
+while not wlan.isconnected() and timeout > 0:
     time.sleep(0.5)
-print("WiFi 연결 완료:", wlan.ifconfig()[0])
+    timeout -= 1
+
+if not wlan.isconnected():
+    print("WiFi 연결 실패! SSID/비밀번호를 확인하세요")
+    # 오프라인 모드로 전환
+else:
+    print("WiFi 연결 완료:", wlan.ifconfig()[0])
 
 def send_to_supabase(data_dict, table="sensor_data"):
     """Supabase에 데이터 전송"""
