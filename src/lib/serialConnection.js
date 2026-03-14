@@ -101,8 +101,14 @@ export class SerialConnection {
     try {
       if (this._reader) {
         await this._reader.cancel();
-        this._reader.releaseLock();
+        // Don't releaseLock here — let _startReading's finally block handle it
         this._reader = null;
+      }
+    } catch { /* ignore */ }
+
+    try {
+      if (this._inputDone) {
+        await this._inputDone;
       }
     } catch { /* ignore */ }
 
@@ -121,7 +127,7 @@ export class SerialConnection {
 
   async _startReading() {
     const decoder = new TextDecoderStream();
-    const inputDone = this._port.readable.pipeTo(decoder.writable);
+    this._inputDone = this._port.readable.pipeTo(decoder.writable);
     const inputStream = decoder.readable;
     this._reader = inputStream.getReader();
 
@@ -138,7 +144,7 @@ export class SerialConnection {
       console.warn('[Serial] Read error:', err);
     } finally {
       try { this._reader.releaseLock(); } catch { /* */ }
-      try { await inputDone; } catch { /* */ }
+      try { await this._inputDone; } catch { /* */ }
     }
   }
 
@@ -207,9 +213,16 @@ export class SerialConnection {
     return null;
   }
 
-  _handleDisconnect() {
+  async _handleDisconnect() {
     this._connected = false;
     this._statusCallback?.(false);
+
+    // Clean up old reader before attempting reconnect
+    if (this._reader) {
+      try { await this._reader.cancel(); } catch(e) {}
+      try { this._reader.releaseLock(); } catch(e) {}
+      this._reader = null;
+    }
 
     if (this._autoReconnect && this._port) {
       console.log('[Serial] 연결 끊김 — 3초 후 재연결 시도...');
@@ -220,6 +233,10 @@ export class SerialConnection {
           this._statusCallback?.(true);
           this._buffer = '';
           this._readLoop = this._startReading();
+
+          // Re-register disconnect listener for the reopened port
+          this._port.addEventListener('disconnect', () => this._handleDisconnect());
+
           console.log('[Serial] 재연결 성공');
         } catch (err) {
           console.warn('[Serial] 재연결 실패:', err);

@@ -174,6 +174,7 @@ export default function VoiceControl({ onCommand, latestData = {}, columnNames =
     return () => {
       if (recognitionRef.current) recognitionRef.current.abort();
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      window.speechSynthesis?.cancel();
     };
   }, []);
 

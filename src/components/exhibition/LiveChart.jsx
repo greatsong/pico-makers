@@ -208,18 +208,27 @@ export default function LiveChart({ dataHistory = [], columnNames = [], maxPoint
 
     resizeCanvas();
 
+    let resizeRafId = null;
     const observer = new ResizeObserver(() => {
-      resizeCanvas();
-      draw();
+      if (resizeRafId) cancelAnimationFrame(resizeRafId);
+      resizeRafId = requestAnimationFrame(() => {
+        resizeCanvas();
+        draw();
+      });
     });
     observer.observe(container);
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (resizeRafId) cancelAnimationFrame(resizeRafId);
+    };
   }, [resizeCanvas, draw]);
 
-  // Redraw on data change
+  // Redraw on data change using rAF
   useEffect(() => {
-    draw();
+    if (animRef.current) cancelAnimationFrame(animRef.current);
+    animRef.current = requestAnimationFrame(() => draw());
+    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
   }, [draw]);
 
   return (

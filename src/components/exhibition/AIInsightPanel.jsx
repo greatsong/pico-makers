@@ -23,6 +23,8 @@ const AIInsightPanel = forwardRef(function AIInsightPanel({ latestData = {}, dat
   const autoTimerRef = useRef(null);
   const lastAutoFetchRef = useRef(0);
   const fetchAIInsightRef = useRef(null);
+  const abortRef = useRef(null);
+  const lastRuleUpdateRef = useRef(0);
 
   // ── 규칙 기반 인사이트 (기본 분석) ──────────────────────
   const generateRuleBasedInsight = useCallback(() => {
@@ -56,6 +58,13 @@ const AIInsightPanel = forwardRef(function AIInsightPanel({ latestData = {}, dat
   // ── Claude API 인사이트 ───────────────────────────────
   const fetchAIInsight = useCallback(async () => {
     if (dataHistory.length < 10 || columnNames.length === 0) return;
+
+    // Cancel any in-flight request
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setIsLoadingAI(true);
     setAiError(null);
@@ -95,6 +104,7 @@ const AIInsightPanel = forwardRef(function AIInsightPanel({ latestData = {}, dat
           messages: [{ role: 'user', content: userMessage }],
           system: systemPrompt,
         }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -130,12 +140,31 @@ const AIInsightPanel = forwardRef(function AIInsightPanel({ latestData = {}, dat
         }
       }
 
+      // Flush remaining buffer content after stream ends
+      if (buffer.trim()) {
+        const remainingLines = buffer.split('\n');
+        for (const line of remainingLines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.text) {
+                fullText += parsed.text;
+                setInsightText(fullText);
+              }
+            } catch {}
+          }
+        }
+      }
+
       if (!fullText) {
         setInsightText(generateRuleBasedInsight());
       }
 
       lastAutoFetchRef.current = Date.now();
     } catch (err) {
+      if (err.name === 'AbortError') return; // Cancelled — ignore
       console.error('AI Insight error:', err);
       setAiError(err.message);
       // 폴백: 규칙 기반 인사이트
@@ -162,10 +191,14 @@ const AIInsightPanel = forwardRef(function AIInsightPanel({ latestData = {}, dat
     }
   }, [isAIMode, generateRuleBasedInsight]);
 
-  // 기본 분석 모드에서 데이터 변경 시 자동 업데이트
+  // 기본 분석 모드에서 데이터 변경 시 자동 업데이트 (5초 쓰로틀)
   useEffect(() => {
     if (!isAIMode && dataHistory.length > 10) {
-      setInsightText(generateRuleBasedInsight());
+      const now = Date.now();
+      if (now - lastRuleUpdateRef.current >= 5000) {
+        lastRuleUpdateRef.current = now;
+        setInsightText(generateRuleBasedInsight());
+      }
     }
   }, [isAIMode, dataHistory.length, generateRuleBasedInsight]);
 
@@ -176,16 +209,15 @@ const AIInsightPanel = forwardRef(function AIInsightPanel({ latestData = {}, dat
     autoTimerRef.current = setInterval(() => {
       const now = Date.now();
       if (
-        dataHistory.length >= 10 &&
         now - lastAutoFetchRef.current >= 60_000 &&
         !isLoadingAI
       ) {
-        fetchAIInsight();
+        fetchAIInsightRef.current?.();
       }
     }, 10_000); // 10초마다 체크, 60초 이상 지났으면 실행
 
     return () => clearInterval(autoTimerRef.current);
-  }, [isAIMode, dataHistory.length, isLoadingAI, fetchAIInsight]);
+  }, [isAIMode, isLoadingAI]);
 
   // ── TTS: 인사이트 음성으로 읽기 ──────────────────────
   const speak = useCallback((text) => {
@@ -218,10 +250,13 @@ const AIInsightPanel = forwardRef(function AIInsightPanel({ latestData = {}, dat
     setIsSpeaking(false);
   }, []);
 
-  // 컴포넌트 언마운트 시 TTS 정리
+  // 컴포넌트 언마운트 시 TTS 및 fetch 정리
   useEffect(() => {
     return () => {
       window.speechSynthesis?.cancel();
+      if (abortRef.current) {
+        abortRef.current.abort();
+      }
     };
   }, []);
 

@@ -6,6 +6,7 @@ const MAX_HISTORY = 500;
 const useSerialStore = create((set, get) => ({
   // Connection state
   isConnected: false,
+  isConnecting: false,
   serialConnection: null,
 
   // Real-time data
@@ -34,6 +35,10 @@ const useSerialStore = create((set, get) => ({
   },
 
   connect: async () => {
+    const { isConnecting } = get();
+    if (isConnecting) return; // Prevent double-click
+    set({ isConnecting: true });
+
     let { serialConnection } = get();
 
     if (!serialConnection) {
@@ -74,8 +79,12 @@ const useSerialStore = create((set, get) => ({
       set({ serialConnection });
     }
 
-    await serialConnection.connect();
-    set({ startTime: Date.now() });
+    try {
+      await serialConnection.connect();
+      set({ startTime: Date.now() });
+    } finally {
+      set({ isConnecting: false });
+    }
   },
 
   disconnect: async () => {
@@ -113,7 +122,9 @@ const useSerialStore = create((set, get) => ({
     a.href = url;
     const dateStr = new Date().toISOString().slice(0, 10);
     a.download = `${projectTitle}-${dateStr}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },
 }));

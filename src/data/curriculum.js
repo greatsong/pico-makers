@@ -306,7 +306,7 @@ while True:
     oled.text(f"{temp}", 4, 16)
     oled.text("o", 4 + len(str(temp)) * 8, 14)
     oled.text("C", 4 + len(str(temp)) * 8 + 8, 16)
-    oled.text(f"H:{humi}%", 76, 16)
+    oled.text(f"H:{humi:.0f}%", 72, 16)
     oled.text(f"[{status}]", 76, 28)
     # 스파크라인 영역
     oled.hline(0, 44, 128, 1)
@@ -316,7 +316,7 @@ while True:
     for i in range(len(temp_history)):
         h = int((temp_history[i] - 10) / 30 * 14)
         h = max(1, min(14, h))
-        oled.vline(2 + i, 62 - h, h, 1)
+        oled.vline(2 + i, 62 - h, h, 0)
     oled.show()
 
     # CSV 저장
@@ -605,7 +605,7 @@ while True:
     oled.hline(0, 13, 128, 1)
     # 현재 값 + 상태
     oled.text(f"{pct:.0f}%", 4, 16)
-    oled.text(f"[{status}]", 76, 16)
+    oled.text(f"[{status}]", 64, 16)
     # 막대그래프
     bar_w = int(min(pct, 100) / 100 * 108)
     oled.rect(8, 28, 112, 8, 1)
@@ -775,6 +775,7 @@ import json
 SSID = "학교WiFi"        # WiFi 이름
 PASSWORD = "비밀번호"     # WiFi 비밀번호
 SHEET_URL = "https://script.google.com/macros/s/여기에_스크립트ID/exec"
+import time
 
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
@@ -890,7 +891,7 @@ while True:
         oled.fill_rect(0, 56, 128, 8, 1)
         oled.text(f">> {status} <<", 4, 56, 0)
     else:
-        oled.text(f"[{status}]", 80, 16)
+        oled.text(f"[{status}]", 96, 16)
     oled.show()
 
     print(f"CO2:{co2}ppm T:{temp}C H:{humi}% [{status}]")
@@ -1581,6 +1582,7 @@ import json
 SSID = "학교WiFi"
 PASSWORD = "비밀번호"
 SERVER = "http://192.168.0.100:5000"  # PC의 IP 주소
+import time
 
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
@@ -1677,7 +1679,7 @@ while True:
     oled.text(f"{elapsed_min}min", 80, 16)
     # 센서 값
     oled.text(f"T:{temp}C", 4, 28)
-    oled.text(f"L:{light_pct}%", 72, 28)
+    oled.text(f"L:{light_pct:.0f}%", 72, 28)
     # 온도 트렌드 그래프
     oled.hline(0, 40, 128, 1)
     oled.text("Trend", 0, 42)
@@ -1845,7 +1847,7 @@ while True:
     oled.hline(0, 13, 128, 1)
     # CO2 값 크게 표시
     oled.text(f"{co2}ppm", 4, 16)
-    oled.text(f"T:{temp}C", 84, 16)
+    oled.text(f"T:{temp}C", 72, 16)
     # 상태 표시 (zone)
     zone = "+" if co2 < 600 else ("++" if co2 < 1000 else ("+++" if co2 < 1500 else "!!!!"))
     oled.text(f"[{status}] {zone}", 4, 28)
@@ -2001,8 +2003,8 @@ while True:
     oled.hline(0, 13, 128, 1)
     # 3축 값 컴팩트
     oled.text(f"X:{ax:.1f}", 0, 16)
-    oled.text(f"Y:{ay:.1f}", 44, 16)
-    oled.text(f"Z:{az:.1f}", 88, 16)
+    oled.text(f"Y:{ay:.1f}", 42, 16)
+    oled.text(f"Z:{az:.1f}", 84, 16)
     # 크기 + 분류
     oled.text(f"G:{mag:.2f}", 4, 28)
     oled.text(f"[{motion}]", 72, 28)
@@ -2154,6 +2156,7 @@ PASSWORD = "비밀번호"
 # Supabase 설정
 SUPABASE_URL = "https://여기에프로젝트ID.supabase.co"
 SUPABASE_KEY = "여기에_anon_key"
+import time
 
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
@@ -2410,7 +2413,7 @@ while True:
     # 오른쪽 패널: Temp + Humi
     oled.vline(64, 13, 38, 1)
     oled.text(f"T:{temp}C", 68, 14)
-    oled.text(f"H:{humi}%", 68, 26)
+    oled.text(f"H:{humi:.0f}%", 68, 26)
     # AQI 스코어 바 (하단)
     oled.hline(1, 50, 126, 1)
     oled.text(f"AQI:{aqi}", 4, 53)
@@ -2597,11 +2600,9 @@ while True:
     # 헤더 바
     oled.fill_rect(1, 1, 126, 11, 1)
     oled.text("EnergySaver", 20, 2, 0)
-    # 상태 아이콘 행
-    person_icon = "\\x7f" if occupied else "\\x5f"
-    relay_icon = "\\x10" if relay_on else "\\x11"
+    # 상태 표시
     oled.text(f"Person:{'Y' if occupied else 'N'}", 4, 14)
-    oled.text(f"Relay:{'ON' if relay_on else'OFF'}", 4, 24)
+    oled.text(f"Relay:{'ON' if relay_on else 'OFF'}", 4, 24)
     # 조도 레벨 바
     oled.text(f"Light:{light_pct:.0f}%", 4, 36)
     l_w = int(min(light_pct, 100) / 100 * 56)
