@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ChevronDown, Zap, BookOpen, Trophy, Rocket, Shield, Plug, Monitor } from 'lucide-react';
 import useAppStore from '../../stores/appStore';
 import useProgressStore from '../../stores/progressStore';
-import { ALL_LESSONS, CURRICULUM, getLessonByNum, getActForLesson } from '../../data/curriculum';
+import { ALL_LESSONS, CURRICULUM, getLessonByNum, getActForLesson, getCourseBLevel } from '../../data/curriculum';
 
 const MODE_OPTIONS = [
   { id: 'curriculum', label: '교재 연동', icon: BookOpen, color: 'text-cyan' },
@@ -21,6 +21,9 @@ export default function LessonHeader() {
   const setLesson = useAppStore(s => s.setLesson);
   const courseBLevel = useAppStore(s => s.courseBLevel);
   const setCourseBLevel = useAppStore(s => s.setCourseBLevel);
+  const courseBExample = useAppStore(s => s.courseBExample);
+  const setCourseBExample = useAppStore(s => s.setCourseBExample);
+  const setActiveSensors = useAppStore(s => s.setActiveSensors);
   const shieldMode = useAppStore(s => s.shieldMode);
   const toggleShieldMode = useAppStore(s => s.toggleShieldMode);
   const completedLessons = useProgressStore(s => s.completedLessons);
@@ -124,22 +127,76 @@ export default function LessonHeader() {
         </div>
       )}
 
-      {/* Course B 레벨 선택 */}
+      {/* Course B 레벨/프로젝트 선택 */}
       {mode === 'courseB' && (
-        <div className="flex items-center gap-1">
-          {[1, 2, 3, 4].map(lv => (
-            <button
-              key={lv}
-              onClick={() => setCourseBLevel(lv)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                courseBLevel === lv
-                  ? 'bg-orange/20 text-orange border border-orange/50'
-                  : 'text-text-secondary hover:text-text-primary border border-border'
-              }`}
-            >
-              Lv.{lv}
-            </button>
-          ))}
+        <div className="relative flex-1 min-w-0">
+          <button
+            onClick={() => { setShowLessonPicker(!showLessonPicker); setShowModePicker(false); }}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-bg-primary border border-border hover:border-orange/50 transition-colors max-w-full"
+          >
+            <span className="text-orange font-mono text-xs font-bold whitespace-nowrap">
+              Lv.{courseBLevel}
+            </span>
+            <span className="text-sm truncate">
+              {getCourseBLevel(courseBLevel)?.title}
+              {courseBExample !== null && getCourseBLevel(courseBLevel)?.examples?.[courseBExample] && (
+                <span className="text-text-muted"> — {getCourseBLevel(courseBLevel).examples[courseBExample].name}</span>
+              )}
+            </span>
+            <ChevronDown size={12} className="text-text-secondary flex-shrink-0" />
+          </button>
+
+          {showLessonPicker && (
+            <div className="absolute top-full mt-1 left-0 bg-bg-elevated border border-border rounded-lg shadow-xl py-1 w-[320px] max-h-[60vh] overflow-y-auto">
+              {[1, 2, 3, 4].map(lv => {
+                const levelData = getCourseBLevel(lv);
+                if (!levelData) return null;
+                const LEVEL_COLORS = { 1: 'text-cyan', 2: 'text-orange', 3: 'text-purple', 4: 'text-pink' };
+                const levelColor = LEVEL_COLORS[lv] || 'text-orange';
+                return (
+                  <div key={lv}>
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-text-muted uppercase tracking-wider bg-bg-surface flex items-center gap-2">
+                      <span className={levelColor}>Lv.{lv}</span>
+                      <span>{levelData.title}</span>
+                      <span className="ml-auto text-text-muted font-normal normal-case">{levelData.focus}</span>
+                    </div>
+                    {levelData.examples.map((ex, i) => {
+                      const exObj = typeof ex === 'string' ? { name: ex } : ex;
+                      const isActive = courseBLevel === lv && courseBExample === i;
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => {
+                            if (courseBLevel !== lv) {
+                              setCourseBLevel(lv);
+                            }
+                            setCourseBExample(i);
+                            if (exObj.sensors) {
+                              setActiveSensors(exObj.sensors);
+                            }
+                            setShowLessonPicker(false);
+                          }}
+                          className={`w-full px-3 py-2 flex items-center gap-2 text-xs transition-colors ${
+                            isActive ? 'bg-orange/10 text-orange' : 'hover:bg-bg-surface text-text-primary'
+                          }`}
+                        >
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                            isActive ? 'bg-orange text-bg-primary' : 'bg-bg-primary text-text-secondary border border-border'
+                          }`}>
+                            {i + 1}
+                          </span>
+                          <span className="truncate">{exObj.name}</span>
+                          <span className="ml-auto text-text-muted">
+                            {'●'.repeat(levelData.difficulty)}{'○'.repeat(5 - levelData.difficulty)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
