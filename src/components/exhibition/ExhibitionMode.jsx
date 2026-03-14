@@ -1,20 +1,26 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plug, PlugZap, Download, Maximize, Minimize, Activity,
-  Clock, Database, Zap, Wifi, WifiOff, Trash2, Monitor,
+  Clock, Database, Wifi, WifiOff, Trash2, Monitor,
 } from 'lucide-react';
 import useSerialStore from '../../stores/serialStore';
 import LiveChart from './LiveChart';
 import DataStats from './DataStats';
+import AIInsightPanel from './AIInsightPanel';
+import VoiceControl from './VoiceControl';
 
 /**
  * ExhibitionMode — full-screen kiosk-style IoT dashboard
  * for school exhibitions. Connects to Pico via Web Serial,
- * displays real-time charts, current values, and statistics.
+ * displays real-time charts, current values, statistics,
+ * AI-powered insights (Claude API), and voice interaction (Web Speech API).
  */
 export default function ExhibitionMode() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Ref for AIInsightPanel to trigger AI analysis from voice commands
+  const aiInsightRef = useRef(null);
 
   // Serial store
   const isConnected = useSerialStore(s => s.isConnected);
@@ -68,6 +74,27 @@ export default function ExhibitionMode() {
     }
   };
 
+  // Voice command handler
+  const handleVoiceCommand = useCallback((commandType) => {
+    switch (commandType) {
+      case 'analyze':
+        // AIInsightPanel의 AI 분석 트리거
+        aiInsightRef.current?.triggerAIAnalysis();
+        break;
+      case 'clearData':
+        clearData();
+        break;
+      case 'exportCSV':
+        exportCSV();
+        break;
+      case 'fullscreen':
+        toggleFullscreen();
+        break;
+      default:
+        break;
+    }
+  }, [clearData, exportCSV, toggleFullscreen]);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg-primary exhibition-container">
       {/* ──────── Header Bar ──────── */}
@@ -90,6 +117,14 @@ export default function ExhibitionMode() {
 
         {/* Spacer */}
         <div className="flex-1" />
+
+        {/* Voice Control buttons (STT + auto-announce) */}
+        <VoiceControl
+          onCommand={handleVoiceCommand}
+          latestData={latestData}
+          columnNames={columnNames}
+          isConnected={isConnected}
+        />
 
         {/* Connection status */}
         <div className="flex items-center gap-2">
@@ -170,19 +205,13 @@ export default function ExhibitionMode() {
             />
           </div>
 
-          {/* AI Insight area */}
-          <div className="rounded-2xl border border-border/50 bg-bg-surface/50 p-4 flex-shrink-0">
-            <div className="flex items-center gap-2 mb-3">
-              <Zap size={16} className="text-purple" />
-              <h2 className="text-sm font-semibold text-text-primary">AI 인사이트</h2>
-            </div>
-            <div className="text-sm text-text-muted leading-relaxed">
-              {dataHistory.length > 10
-                ? generateInsight(latestData, columnNames, dataHistory)
-                : 'Pico에서 데이터가 수집되면 AI가 센서 데이터를 분석하여 인사이트를 제공합니다.'
-              }
-            </div>
-          </div>
+          {/* AI Insight Panel — Claude API + 규칙 기반 + TTS */}
+          <AIInsightPanel
+            ref={aiInsightRef}
+            latestData={latestData}
+            dataHistory={dataHistory}
+            columnNames={columnNames}
+          />
         </div>
       </div>
 
@@ -249,38 +278,4 @@ function formatDuration(ms) {
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
-/** Generate a simple insight based on current data */
-function generateInsight(latestData, columnNames, dataHistory) {
-  if (columnNames.length === 0) return '';
-
-  const insights = [];
-
-  for (const col of columnNames) {
-    const values = dataHistory.map(e => e[col]).filter(v => typeof v === 'number');
-    if (values.length < 2) continue;
-
-    const avg = values.reduce((a, b) => a + b, 0) / values.length;
-    const current = latestData[col];
-    const recent10 = values.slice(-10);
-    const recent10Avg = recent10.reduce((a, b) => a + b, 0) / recent10.length;
-    const older = values.slice(0, -10);
-    const olderAvg = older.length > 0 ? older.reduce((a, b) => a + b, 0) / older.length : avg;
-
-    if (typeof current === 'number') {
-      const pctChange = olderAvg !== 0 ? ((recent10Avg - olderAvg) / Math.abs(olderAvg)) * 100 : 0;
-
-      if (Math.abs(pctChange) > 5) {
-        const direction = pctChange > 0 ? '상승' : '하락';
-        insights.push(`${col}: 최근 ${direction} 추세 (${pctChange > 0 ? '+' : ''}${pctChange.toFixed(1)}%)`);
-      } else {
-        insights.push(`${col}: 안정적 (평균 ${avg.toFixed(1)})`);
-      }
-    }
-  }
-
-  return insights.length > 0
-    ? insights.join('\n')
-    : '데이터를 분석 중입니다...';
 }
