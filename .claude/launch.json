@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pico-makers",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "4019"],
+      "port": 4019
+    }
+  ]
+}
