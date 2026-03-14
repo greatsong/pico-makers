@@ -411,7 +411,7 @@ plt.show()
           code: `from machine import ADC, Pin, I2C
 import time
 
-# ── 소리 센서 설정 (ADC — Grove A2 포트: GP27) ──
+# ── 소리 센서 설정 (ADC — Grove A1 포트: GP27) ──
 sound = ADC(Pin(27))
 
 # ── OLED 설정 ──
@@ -1015,7 +1015,7 @@ import time
 trig = Pin(16, Pin.OUT)
 echo = Pin(17, Pin.IN)
 
-# ── 소리 센서 설정 (Grove A2: GP27) ──
+# ── 소리 센서 설정 (Grove A1: GP27) ──
 sound = ADC(Pin(27))
 
 # ── 부저 설정 (GP18 — 초음파가 GP16 사용하므로 대체 핀) ──
@@ -1231,7 +1231,7 @@ import time
 i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
 dht_addr = 0x38
 light = ADC(Pin(26))  # Grove A0 포트
-sound = ADC(Pin(27))  # Grove A2 포트
+sound = ADC(Pin(27))  # Grove A1 포트
 time.sleep(0.1)
 
 from ssd1306 import SSD1306_I2C
