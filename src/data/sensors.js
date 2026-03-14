@@ -3766,6 +3766,72 @@ time.sleep(0.5)
 servo.duty_u16(0)
 print("\\u2705 서보 모터가 움직였나요? (90도 → 0도 → 90도)")`,
   },
+
+  // ═══════════════════ 환경 (추가) ═══════════════════
+  DUST: {
+    id: "DUST", name: "미세먼지 센서", model: "GP2Y1010AU", label: "미세먼지 측정",
+    icon: "🌫️", color: "#aabbcc",
+    category: "환경", protocol: "아날로그", address: null,
+    difficulty: 3, lessons: [], recommended: false,
+    description: "공기 중 미세먼지(PM2.5) 농도를 측정하는 광학식 센서",
+    grove: true,
+    shield: {
+      grovePort: { name: "A2", type: "Analog", position: "right-top", color: "#ffaa00" },
+      pins: [
+        { sensor: "VCC", pico: 36, picoName: "3.3V", gp: null, wire: "#ff4444", label: "빨강" },
+        { sensor: "GND", pico: 38, picoName: "GND", gp: null, wire: "#666666", label: "검정" },
+        { sensor: "AOUT", pico: 34, picoName: "GP28", gp: 28, wire: "#ffdd00", label: "노랑" },
+      ],
+      warning: "LED 드라이버 핀(GP15)이 필요할 수 있어요. 데이터시트를 확인하세요.",
+      note: "Grove A2 포트(GP28)에 연결하세요. ADC로 아날로그 값을 읽습니다.",
+      code: `from machine import ADC, Pin
+import time
+
+# 미세먼지 센서 (ADC — Grove A2 포트: GP28)
+dust = ADC(Pin(28))
+
+while True:
+    raw = dust.read_u16()
+    # 간이 변환 (보정 필요)
+    voltage = raw / 65535 * 3.3
+    dust_ug = max(0, (voltage - 0.1) * 200)  # μg/m³ 근사값
+    print(f"미세먼지: {dust_ug:.0f} μg/m³ (raw: {raw})")
+    time.sleep(1)`,
+    },
+  },
+
+  // ═══════════════════ 출력 (추가) ═══════════════════
+  RELAY: {
+    id: "RELAY", name: "릴레이 모듈", model: "Grove Relay", label: "전원 제어",
+    icon: "🔌", color: "#ff6644",
+    category: "출력", protocol: "디지털", address: null,
+    difficulty: 2, lessons: [], recommended: false,
+    description: "외부 기기(조명, 팬 등)의 전원을 ON/OFF 제어하는 스위칭 모듈",
+    grove: true,
+    shield: {
+      grovePort: { name: "D18", type: "Digital", position: "left-top", color: "#00ccff" },
+      pins: [
+        { sensor: "VCC", pico: 36, picoName: "3.3V", gp: null, wire: "#ff4444", label: "빨강" },
+        { sensor: "GND", pico: 38, picoName: "GND", gp: null, wire: "#666666", label: "검정" },
+        { sensor: "SIG", pico: 24, picoName: "GP18", gp: 18, wire: "#ffdd00", label: "노랑" },
+      ],
+      warning: "릴레이로 220V 기기를 제어할 때는 반드시 선생님의 지도하에 진행하세요!",
+      note: "GP18 디지털 핀으로 ON(1)/OFF(0) 제어합니다.",
+      code: `from machine import Pin
+import time
+
+# 릴레이 (GP18 — 디지털 출력)
+relay = Pin(18, Pin.OUT)
+
+while True:
+    relay.value(1)   # ON
+    print("릴레이 ON")
+    time.sleep(3)
+    relay.value(0)   # OFF
+    print("릴레이 OFF")
+    time.sleep(3)`,
+    },
+  },
 };
 
 // 카테고리별 센서 순서
@@ -3783,7 +3849,7 @@ export const SENSOR_ORDER = [
   // 입력
   "BUTTON", "TOUCH", "ROTARY",
   // 환경 (기초 → 고급)
-  "DHT20", "BMP280", "SCD41", "MOISTURE", "GUVAS12D", "TDS", "HM3301", "MULTIGAS",
+  "DHT20", "BMP280", "SCD41", "DUST", "MOISTURE", "GUVAS12D", "TDS", "HM3301", "MULTIGAS",
   // 빛/색상
   "LIGHT", "TSL2591", "TCS34725", "IR_RECEIVER",
   // 소리/진동
@@ -3793,7 +3859,7 @@ export const SENSOR_ORDER = [
   // 신체
   "PULSE", "GSR", "MLX90614",
   // 출력 (고급)
-  "LED_BAR", "OLED", "SERVO", "JOYSTICK",
+  "LED_BAR", "OLED", "SERVO", "RELAY", "JOYSTICK",
 ];
 
 export default SENSORS;

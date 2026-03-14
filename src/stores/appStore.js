@@ -1,8 +1,9 @@
 import { create } from 'zustand';
-import { getSensorsForLesson } from '../data/curriculum';
+import { getSensorsForLesson, getCourseBLevel } from '../data/curriculum';
+import useChatStore from './chatStore';
 
 const useAppStore = create((set, get) => ({
-  // 프로젝트 모드: 'curriculum' | 'free' | 'hackathon' | 'courseB'
+  // 프로젝트 모드: 'curriculum' | 'free' | 'hackathon' | 'courseB' | 'exhibition'
   mode: 'curriculum',
 
   // 현재 차시 (1~15, Course A)
@@ -26,8 +27,42 @@ const useAppStore = create((set, get) => ({
   // 모바일 패널: 'chat' | 'tools'
   mobilePanel: 'chat',
 
-  // 모드 변경
-  setMode: (mode) => set({ mode }),
+  // 모드 변경 → 센서 + 환영 메시지 자동 업데이트
+  setMode: (mode) => {
+    const state = get();
+    const updates = { mode };
+
+    if (mode === 'exhibition') {
+      // 전시 모드 — 센서 변경 없이 모드만 전환
+      set(updates);
+      useChatStore.getState().resetForMode(mode, {});
+      return;
+    }
+
+    if (mode === 'courseB') {
+      // Course B 첫 번째 예제의 센서를 기본 로드
+      const levelData = getCourseBLevel(state.courseBLevel);
+      if (levelData?.examples?.[0]?.sensors) {
+        updates.activeSensors = levelData.examples[0].sensors;
+        updates.courseBExample = 0;
+      }
+      updates.rightTab = 'tips'; // 팁 탭으로 자동 전환
+    } else if (mode === 'curriculum') {
+      const sensors = getSensorsForLesson(state.selectedLesson);
+      if (sensors.length > 0) updates.activeSensors = sensors;
+      updates.courseBExample = null;
+    } else {
+      updates.courseBExample = null;
+    }
+
+    set(updates);
+
+    // 환영 메시지 교체
+    useChatStore.getState().resetForMode(mode, {
+      courseBLevel: state.courseBLevel,
+      selectedLesson: state.selectedLesson,
+    });
+  },
 
   // 차시 변경 → 해당 차시 센서 자동 로드
   setLesson: (num) => {
@@ -38,8 +73,21 @@ const useAppStore = create((set, get) => ({
     });
   },
 
-  // Course B 레벨 변경
-  setCourseBLevel: (level) => set({ courseBLevel: level, courseBExample: null }),
+  // Course B 레벨 변경 → 센서 + 환영 메시지 자동 업데이트
+  setCourseBLevel: (level) => {
+    const levelData = getCourseBLevel(level);
+    const updates = { courseBLevel: level, courseBExample: null };
+
+    if (levelData?.examples?.[0]?.sensors) {
+      updates.activeSensors = levelData.examples[0].sensors;
+      updates.courseBExample = 0;
+    }
+
+    set(updates);
+
+    // 환영 메시지 교체
+    useChatStore.getState().resetForMode('courseB', { courseBLevel: level });
+  },
 
   // Course B 예제 선택
   setCourseBExample: (index) => set({ courseBExample: index }),

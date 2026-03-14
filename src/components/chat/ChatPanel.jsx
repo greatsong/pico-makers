@@ -173,7 +173,7 @@ export default function ChatPanel() {
           />
           <div className="flex gap-1.5">
             <button
-              onClick={clearChat}
+              onClick={() => clearChat(mode, { courseBLevel, selectedLesson })}
               className="p-2.5 rounded-xl text-text-muted hover:text-red hover:bg-red/10 transition-colors"
               title="대화 초기화"
             >

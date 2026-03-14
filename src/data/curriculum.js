@@ -231,6 +231,12 @@ export const CURRICULUM = {
       aiRole: 'coach', codeStyle: 'hints',
       prerequisite: 'Course A 1~4차시',
       textbookUrl: '/course-b/lv1/',
+      dataStorage: {
+        method: 'csv',
+        title: 'CSV 파일 저장',
+        desc: 'Pico 내부 파일 시스템에 CSV로 데이터 저장',
+        icon: '📁',
+      },
       examples: [
         {
           name: '교실 온도 대시보드',
@@ -269,21 +275,41 @@ f = open("temp_log.csv", "a")
 f.write("time_s,temp,humi\\n")
 start = time.ticks_ms()
 
+# 온도 이력 (스파크라인용, 최대 50개)
+temp_history = []
+
 # ── 메인 루프 ──
 while True:
     temp, humi = read_dht20()
     status = get_status(temp)
     elapsed = time.ticks_diff(time.ticks_ms(), start) // 1000
 
+    # 이력 저장
+    temp_history.append(int(temp))
+    if len(temp_history) > 50:
+        temp_history.pop(0)
+
     # OLED 대시보드
     oled.fill(0)
-    oled.text("== Classroom ==", 4, 0)
-    oled.text(f"Temp: {temp} C", 4, 16)
-    oled.text(f"Humi: {humi} %", 4, 28)
-    oled.text(f"[{status}]", 4, 44)
-    # 온도 막대그래프 (0~40도 범위)
-    bar_w = int(min(max(temp, 0), 40) / 40 * 100)
-    oled.fill_rect(14, 56, bar_w, 6, 1)
+    # 헤더 바
+    oled.fill_rect(0, 0, 128, 12, 1)
+    oled.text("Classroom", 28, 2, 0)
+    oled.hline(0, 13, 128, 1)
+    # 온습도 표시
+    oled.text(f"{temp}", 4, 16)
+    oled.text("o", 4 + len(str(temp)) * 8, 14)
+    oled.text("C", 4 + len(str(temp)) * 8 + 8, 16)
+    oled.text(f"H:{humi}%", 76, 16)
+    oled.text(f"[{status}]", 76, 28)
+    # 스파크라인 영역
+    oled.hline(0, 44, 128, 1)
+    oled.fill_rect(0, 46, 128, 18, 1)
+    oled.text("0", 0, 46, 0)
+    oled.text("40C", 100, 46, 0)
+    for i in range(len(temp_history)):
+        h = int((temp_history[i] - 10) / 30 * 14)
+        h = max(1, min(14, h))
+        oled.vline(2 + i, 62 - h, h, 1)
     oled.show()
 
     # CSV 저장
@@ -292,6 +318,84 @@ while True:
 
     print(f"{elapsed}s | {temp}°C {humi}% [{status}]")
     time.sleep(2)`,
+          pcCode: `# PC 실시간 대시보드 — 교실 온도 대시보드
+# 사용법: pip install pyserial matplotlib
+# 실행: python classroom_temp_pc.py
+
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from collections import deque
+import time
+import re
+
+# ── 시리얼 연결 (포트 이름은 환경에 맞게 수정) ──
+# Windows: 'COM3', macOS: '/dev/tty.usbmodem...', Linux: '/dev/ttyACM0'
+PORT = '/dev/tty.usbmodem1101'
+BAUD = 115200
+
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)  # 연결 안정화
+
+# ── 데이터 버퍼 ──
+MAX_POINTS = 100
+times = deque(maxlen=MAX_POINTS)
+temps = deque(maxlen=MAX_POINTS)
+humis = deque(maxlen=MAX_POINTS)
+
+# ── 그래프 설정 ──
+plt.style.use('dark_background')
+fig, ax1 = plt.subplots(figsize=(10, 5))
+fig.suptitle('Classroom Temp Dashboard', fontsize=14, color='cyan')
+
+ax2 = ax1.twinx()
+line_temp, = ax1.plot([], [], 'r-o', markersize=3, label='Temp (°C)')
+line_humi, = ax2.plot([], [], 'c-s', markersize=3, label='Humi (%)')
+
+ax1.set_xlabel('Time (s)')
+ax1.set_ylabel('Temperature (°C)', color='red')
+ax2.set_ylabel('Humidity (%)', color='cyan')
+ax1.set_ylim(10, 40)
+ax2.set_ylim(0, 100)
+
+# 쾌적 온도 영역 표시
+ax1.axhspan(18, 28, alpha=0.15, color='green', label='Good (18-28°C)')
+ax1.axhspan(0, 18, alpha=0.10, color='blue', label='Cold')
+ax1.axhspan(28, 50, alpha=0.10, color='red', label='Hot')
+
+ax1.legend(loc='upper left')
+ax2.legend(loc='upper right')
+ax1.grid(True, alpha=0.3)
+
+# ── 실시간 업데이트 ──
+def update(frame):
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line:
+            return
+        # 파싱: "12s | 24.5°C 55.2% [Good]"
+        m = re.match(r'(\\d+)s \\| ([\\d.]+)°C ([\\d.]+)% \\[(.+)\\]', line)
+        if not m:
+            return
+        t = int(m.group(1))
+        temp = float(m.group(2))
+        humi = float(m.group(3))
+
+        times.append(t)
+        temps.append(temp)
+        humis.append(humi)
+
+        line_temp.set_data(list(times), list(temps))
+        line_humi.set_data(list(times), list(humis))
+        ax1.set_xlim(max(0, t - 200), t + 10)
+        fig.canvas.manager.set_window_title(f'Classroom — {temp}°C {humi}% [{m.group(4)}]')
+    except:
+        pass
+
+ani = FuncAnimation(fig, update, interval=2000, cache_frame_data=False)
+plt.tight_layout()
+plt.show()
+`,
         },
         {
           name: '소음 레벨 모니터',
@@ -332,16 +436,22 @@ while True:
 
     # OLED 대시보드
     oled.fill(0)
-    oled.text("== Noise ==", 20, 0)
-    oled.text(f"{pct:.0f}%", 48, 16)
-    oled.text(f"[{level_text}]", 4, 32)
-    # 레벨 미터 (막대 7칸)
+    # 헤더 바
+    oled.fill_rect(0, 0, 128, 12, 1)
+    oled.text("Noise Level", 24, 2, 0)
+    oled.hline(0, 13, 128, 1)
+    # 퍼센트 크게 표시
+    pct_str = f"{pct:.0f}%"
+    oled.text(pct_str, 64 - len(pct_str) * 4, 18)
+    oled.text(f"[{level_text}]", 64 - len(level_text) * 4 - 8, 30)
+    # 레벨 미터 (막대 7칸, 2px 간격)
+    oled.hline(0, 42, 128, 1)
     for i in range(7):
-        x = 14 + i * 16
+        x = 10 + i * 16
         if i < bars:
-            oled.fill_rect(x, 48, 12, 14, 1)
+            oled.fill_rect(x, 46, 12, 16, 1)
         else:
-            oled.rect(x, 48, 12, 14, 1)
+            oled.rect(x, 46, 12, 16, 1)
     oled.show()
 
     # CSV 저장
@@ -350,6 +460,92 @@ while True:
 
     print(f"{elapsed}s | {pct:.0f}% [{level_text}]")
     time.sleep(0.5)`,
+          pcCode: `# PC 실시간 대시보드 — 소음 레벨 모니터
+# 사용법: pip install pyserial matplotlib
+# 실행: python noise_level_pc.py
+
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from collections import deque
+import numpy as np
+import time
+import re
+
+# ── 시리얼 연결 ──
+PORT = '/dev/tty.usbmodem1101'
+BAUD = 115200
+
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)
+
+# ── 데이터 버퍼 ──
+MAX_POINTS = 200
+times = deque(maxlen=MAX_POINTS)
+noise_pcts = deque(maxlen=MAX_POINTS)
+
+# ── 그래프 설정 ──
+plt.style.use('dark_background')
+fig, (ax_bar, ax_wave) = plt.subplots(1, 2, figsize=(12, 5),
+                                       gridspec_kw={'width_ratios': [1, 2]})
+fig.suptitle('Noise Level Monitor', fontsize=14, color='cyan')
+
+# VU 미터 (막대 차트)
+vu_labels = ['Q', 'N', 'L', 'VL']
+vu_colors = ['#00ff88', '#00ff88', '#ffaa00', '#ff3333']
+vu_bars = ax_bar.barh(vu_labels, [0, 0, 0, 0], color=vu_colors, height=0.6)
+ax_bar.set_xlim(0, 100)
+ax_bar.set_title('VU Meter', color='lime')
+ax_bar.set_xlabel('%')
+
+# 파형 (롤링)
+line_wave, = ax_wave.plot([], [], 'lime', linewidth=1)
+ax_wave.set_ylim(0, 100)
+ax_wave.set_title('Noise Waveform', color='lime')
+ax_wave.set_xlabel('Time (s)')
+ax_wave.set_ylabel('Level (%)')
+ax_wave.grid(True, alpha=0.3)
+
+# 영역 색상
+ax_wave.axhspan(0, 20, alpha=0.1, color='green')
+ax_wave.axhspan(20, 50, alpha=0.1, color='yellow')
+ax_wave.axhspan(50, 75, alpha=0.1, color='orange')
+ax_wave.axhspan(75, 100, alpha=0.1, color='red')
+
+def update(frame):
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line:
+            return
+        # 파싱: "12s | 45% [Normal]"
+        m = re.match(r'(\\d+)s \\| (\\d+)% \\[(.+)\\]', line)
+        if not m:
+            return
+        t = int(m.group(1))
+        pct = float(m.group(2))
+        level = m.group(3)
+
+        times.append(t)
+        noise_pcts.append(pct)
+
+        # VU 미터 업데이트
+        levels = [min(pct, 20), min(max(pct - 20, 0), 30),
+                  min(max(pct - 50, 0), 25), max(pct - 75, 0)]
+        for bar, val in zip(vu_bars, levels):
+            bar.set_width(val)
+
+        # 파형 업데이트
+        line_wave.set_data(list(times), list(noise_pcts))
+        ax_wave.set_xlim(max(0, t - 100), t + 5)
+
+        fig.canvas.manager.set_window_title(f'Noise — {pct:.0f}% [{level}]')
+    except:
+        pass
+
+ani = FuncAnimation(fig, update, interval=500, cache_frame_data=False)
+plt.tight_layout()
+plt.show()
+`,
         },
         {
           name: '자동 조명 측정기',
@@ -396,13 +592,25 @@ while True:
 
     # OLED 대시보드
     oled.fill(0)
-    oled.text("== Light ==", 20, 0)
-    oled.text(f"{pct:.0f}% [{status}]", 4, 12)
-    # 실시간 그래프
-    for i, val in enumerate(graph_data):
-        x = 14 + i
-        h = int(val / 100 * 36)
-        oled.vline(x, 62 - h, h, 1)
+    # 헤더 바
+    oled.fill_rect(0, 0, 128, 12, 1)
+    oled.text("Light Meter", 24, 2, 0)
+    oled.hline(0, 13, 128, 1)
+    # 현재 값 + 상태
+    oled.text(f"{pct:.0f}%", 4, 16)
+    oled.text(f"[{status}]", 76, 16)
+    # 막대그래프
+    bar_w = int(min(pct, 100) / 100 * 108)
+    oled.rect(8, 28, 112, 8, 1)
+    oled.fill_rect(10, 30, bar_w, 4, 1)
+    # 스파크라인 영역 (테두리 프레임)
+    oled.hline(0, 38, 128, 1)
+    oled.rect(0, 40, 128, 24, 1)
+    for i in range(min(len(graph_data), 124)):
+        idx = len(graph_data) - min(len(graph_data), 124) + i
+        h = int(graph_data[idx] / 100 * 20)
+        h = max(1, min(20, h))
+        oled.vline(2 + i, 62 - h, h, 1)
     oled.show()
 
     # CSV 저장
@@ -411,6 +619,82 @@ while True:
 
     print(f"{elapsed}s | {pct:.0f}% [{status}]")
     time.sleep(1)`,
+          pcCode: `# PC 실시간 대시보드 — 자동 조명 측정기
+# 사용법: pip install pyserial matplotlib
+# 실행: python light_meter_pc.py
+
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from collections import deque
+import time
+import re
+
+# ── 시리얼 연결 ──
+PORT = '/dev/tty.usbmodem1101'
+BAUD = 115200
+
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)
+
+# ── 데이터 버퍼 ──
+MAX_POINTS = 200
+times = deque(maxlen=MAX_POINTS)
+light_vals = deque(maxlen=MAX_POINTS)
+
+# ── 그래프 설정 ──
+plt.style.use('dark_background')
+fig, ax = plt.subplots(figsize=(10, 5))
+fig.suptitle('Light Level Monitor', fontsize=14, color='cyan')
+
+line_light, = ax.plot([], [], 'yellow', linewidth=1.5)
+fill = None
+ax.set_ylim(0, 100)
+ax.set_xlabel('Time (s)')
+ax.set_ylabel('Light Level (%)')
+ax.grid(True, alpha=0.3)
+
+# 주/야간 영역 표시
+ax.axhspan(0, 20, alpha=0.15, color='#1a1a3e', label='Dark')
+ax.axhspan(20, 60, alpha=0.10, color='#4a4a00', label='Normal')
+ax.axhspan(60, 100, alpha=0.15, color='#aaaa00', label='Bright')
+ax.legend(loc='upper left')
+
+def update(frame):
+    global fill
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line:
+            return
+        # 파싱: "12s | 45% [Normal]"
+        m = re.match(r'(\\d+)s \\| (\\d+)% \\[(.+)\\]', line)
+        if not m:
+            return
+        t = int(m.group(1))
+        val = float(m.group(2))
+        status = m.group(3)
+
+        times.append(t)
+        light_vals.append(val)
+
+        t_list = list(times)
+        v_list = list(light_vals)
+        line_light.set_data(t_list, v_list)
+
+        # 면적 채우기 갱신
+        if fill:
+            fill.remove()
+        fill = ax.fill_between(t_list, v_list, alpha=0.3, color='yellow')
+
+        ax.set_xlim(max(0, t - 200), t + 10)
+        fig.canvas.manager.set_window_title(f'Light — {val:.0f}% [{status}]')
+    except:
+        pass
+
+ani = FuncAnimation(fig, update, interval=1000, cache_frame_data=False)
+plt.tight_layout()
+plt.show()
+`,
         },
       ],
       requirements: [
@@ -447,6 +731,67 @@ while True:
       aiRole: 'coach', codeStyle: 'hints',
       prerequisite: 'Course A 1~10차시',
       textbookUrl: '/course-b/lv2/',
+      dataStorage: {
+        method: 'google-sheets',
+        title: 'Google Sheets 연동',
+        desc: 'WiFi로 Google Sheets에 자동 기록 — 어디서든 데이터 확인',
+        icon: '📊',
+        setupGuide: '## Google Sheets 연동 설정\n\n### 1단계: Google Apps Script 만들기\n1. Google Drive에서 새 스프레드시트 생성\n2. 확장 프로그램 → Apps Script 클릭\n3. 아래 코드를 붙여넣고 "배포" → "새 배포"\n4. 유형: "웹 앱", 접근: "누구나" 선택\n5. 배포 URL을 복사하세요',
+        appsScriptCode: `function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var data = JSON.parse(e.postData.contents);
+
+  // 타임스탬프 자동 추가
+  var row = [new Date()];
+  var keys = Object.keys(data);
+
+  // 첫 행이면 헤더 추가
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["timestamp", ...keys]);
+  }
+
+  // 데이터 행 추가
+  keys.forEach(function(key) {
+    row.push(data[key]);
+  });
+  sheet.appendRow(row);
+
+  return ContentService.createTextOutput(
+    JSON.stringify({status: "ok"})
+  ).setMimeType(ContentService.MimeType.JSON);
+}`,
+        picoTemplate: `# ── WiFi 연결 ──
+import network
+import urequests
+import json
+
+SSID = "학교WiFi"        # WiFi 이름
+PASSWORD = "비밀번호"     # WiFi 비밀번호
+SHEET_URL = "https://script.google.com/macros/s/여기에_스크립트ID/exec"
+
+wlan = network.WLAN(network.STA_IF)
+wlan.active(True)
+wlan.connect(SSID, PASSWORD)
+
+print("WiFi 연결 중...")
+while not wlan.isconnected():
+    time.sleep(0.5)
+print("WiFi 연결 완료:", wlan.ifconfig()[0])
+
+def send_to_sheets(data_dict):
+    """Google Sheets에 데이터 전송"""
+    try:
+        r = urequests.post(SHEET_URL,
+            json=data_dict,
+            headers={"Content-Type": "application/json"})
+        print(f"Sheets 전송 OK ({r.status_code})")
+        r.close()
+    except Exception as e:
+        print(f"전송 실패: {e}")
+
+# 메인 루프에서 사용 예시:
+# send_to_sheets({"temp": temp, "humi": humi, "co2": co2})`,
+      },
       examples: [
         {
           name: '스마트 환기 시스템',
@@ -501,19 +846,147 @@ while True:
 
     # OLED 대시보드
     oled.fill(0)
-    oled.text("== Smart Vent ==", 0, 0)
-    oled.text(f"CO2 : {co2} ppm", 4, 14)
-    oled.text(f"Temp: {temp} C", 4, 26)
-    oled.text(f"Humi: {humi} %", 4, 38)
+    # 헤더 바
+    oled.fill_rect(0, 0, 128, 12, 1)
+    oled.text("Smart Vent", 28, 2, 0)
+    oled.hline(0, 13, 128, 1)
+    # CO2 값 크게 표시
+    oled.text(f"CO2 {co2}ppm", 4, 16)
+    # 3개 미니 프로그레스 바
+    # CO2 바 (0~2000ppm)
+    oled.text("C", 0, 28)
+    co2_w = int(min(co2, 2000) / 2000 * 80)
+    oled.rect(10, 28, 82, 8, 1)
+    oled.fill_rect(12, 30, co2_w, 4, 1)
+    # Temp 바 (0~40C)
+    oled.text("T", 0, 38)
+    temp_w = int(min(max(temp, 0), 40) / 40 * 80)
+    oled.rect(10, 38, 82, 8, 1)
+    oled.fill_rect(12, 40, temp_w, 4, 1)
+    oled.text(f"{temp}", 96, 38)
+    # Humi 바 (0~100%)
+    oled.text("H", 0, 48)
+    humi_w = int(min(humi, 100) / 100 * 80)
+    oled.rect(10, 48, 82, 8, 1)
+    oled.fill_rect(12, 50, humi_w, 4, 1)
+    oled.text(f"{humi}", 96, 48)
+    # 상태 표시
     if need_vent:
-        oled.fill_rect(0, 52, 128, 12, 1)
-        oled.text(f">> {status} <<", 16, 54, 0)
+        oled.fill_rect(0, 56, 128, 8, 1)
+        oled.text(f">> {status} <<", 4, 56, 0)
     else:
-        oled.text(f"[{status}]", 4, 54)
+        oled.text(f"[{status}]", 80, 16)
     oled.show()
 
     print(f"CO2:{co2}ppm T:{temp}C H:{humi}% [{status}]")
     time.sleep(5)`,
+          pcCode: `# PC 실시간 대시보드 — 스마트 환기 시스템
+# 사용법: pip install pyserial matplotlib
+# 실행: python smart_vent_pc.py
+
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from matplotlib.patches import FancyBboxPatch
+from collections import deque
+import time
+import re
+
+# ── 시리얼 연결 ──
+PORT = '/dev/tty.usbmodem1101'
+BAUD = 115200
+
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)
+
+# ── 데이터 버퍼 ──
+MAX_POINTS = 100
+idx_buf = deque(maxlen=MAX_POINTS)
+co2_buf = deque(maxlen=MAX_POINTS)
+temp_buf = deque(maxlen=MAX_POINTS)
+humi_buf = deque(maxlen=MAX_POINTS)
+count = 0
+
+# ── 그래프 설정 (2x2) ──
+plt.style.use('dark_background')
+fig, ((ax_co2, ax_temp), (ax_humi, ax_status)) = plt.subplots(2, 2, figsize=(12, 8))
+fig.suptitle('Smart Ventilation Dashboard', fontsize=14, color='cyan')
+
+# CO2 트렌드
+line_co2, = ax_co2.plot([], [], 'r-', linewidth=2)
+ax_co2.set_title('CO2 (ppm)', color='red')
+ax_co2.set_ylim(300, 2500)
+ax_co2.axhline(y=1000, color='orange', linestyle='--', alpha=0.5, label='Vent Soon')
+ax_co2.axhline(y=1500, color='red', linestyle='--', alpha=0.5, label='Vent Now!')
+ax_co2.legend(fontsize=8)
+ax_co2.grid(True, alpha=0.3)
+
+# 온도 트렌드
+line_temp, = ax_temp.plot([], [], '#ff8800', linewidth=2)
+ax_temp.set_title('Temperature (°C)', color='#ff8800')
+ax_temp.set_ylim(10, 40)
+ax_temp.axhspan(18, 28, alpha=0.1, color='green')
+ax_temp.grid(True, alpha=0.3)
+
+# 습도 트렌드
+line_humi, = ax_humi.plot([], [], 'cyan', linewidth=2)
+ax_humi.set_title('Humidity (%)', color='cyan')
+ax_humi.set_ylim(0, 100)
+ax_humi.axhspan(40, 60, alpha=0.1, color='green')
+ax_humi.grid(True, alpha=0.3)
+
+# 상태 표시
+ax_status.set_xlim(0, 10)
+ax_status.set_ylim(0, 10)
+ax_status.set_title('Status', color='white')
+ax_status.axis('off')
+status_text = ax_status.text(5, 5, 'Waiting...', ha='center', va='center',
+                              fontsize=24, color='gray',
+                              bbox=dict(boxstyle='round,pad=0.5', facecolor='#222'))
+
+def update(frame):
+    global count
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line:
+            return
+        # 파싱: "CO2:850ppm T:24.5C H:55.2% [Good]"
+        m = re.match(r'CO2:(\\d+)ppm T:([\\d.]+)C H:([\\d.]+)% \\[(.+)\\]', line)
+        if not m:
+            return
+        co2 = int(m.group(1))
+        temp = float(m.group(2))
+        humi = float(m.group(3))
+        status = m.group(4)
+        count += 1
+
+        idx_buf.append(count)
+        co2_buf.append(co2)
+        temp_buf.append(temp)
+        humi_buf.append(humi)
+
+        x = list(idx_buf)
+        line_co2.set_data(x, list(co2_buf))
+        line_temp.set_data(x, list(temp_buf))
+        line_humi.set_data(x, list(humi_buf))
+
+        for ax in [ax_co2, ax_temp, ax_humi]:
+            ax.set_xlim(max(0, count - MAX_POINTS), count + 5)
+
+        # 상태 색상
+        colors = {'Good': '#00ff88', 'Vent Soon': '#ffaa00', 'VENT NOW!': '#ff3333'}
+        c = colors.get(status, 'gray')
+        status_text.set_text(f'{status}\\nCO2: {co2} ppm')
+        status_text.set_color(c)
+
+        fig.canvas.manager.set_window_title(f'Vent — CO2:{co2} T:{temp} H:{humi} [{status}]')
+    except:
+        pass
+
+ani = FuncAnimation(fig, update, interval=5000, cache_frame_data=False)
+plt.tight_layout()
+plt.show()
+`,
         },
         {
           name: '간이 보안 시스템',
@@ -584,14 +1057,152 @@ while True:
 
     # OLED 대시보드
     oled.fill(0)
-    oled.text("== Security ==", 8, 0)
-    oled.text(f"Dist: {dist:.0f} cm", 4, 16)
-    oled.text(f"Noise: {noise:.0f} %", 4, 28)
-    oled.text(f"[{status}]", 4, 44)
+    # 헤더 바
+    oled.fill_rect(0, 0, 128, 12, 1)
+    oled.text("Security", 32, 2, 0)
+    oled.hline(0, 13, 128, 1)
+    # 거리 표시 + 근접 인디케이터
+    oled.text(f"Dist: {dist:.0f}cm", 4, 16)
+    prox = min(int((DIST_THRESHOLD - min(dist, DIST_THRESHOLD)) / DIST_THRESHOLD * 5), 5)
+    for i in range(5):
+        x = 100 + i * 5
+        if i < prox:
+            oled.fill_rect(x, 16, 4, 8, 1)
+        else:
+            oled.rect(x, 16, 4, 8, 1)
+    # 소음 레벨 바
+    oled.text(f"Sound:{noise:.0f}%", 4, 28)
+    noise_w = int(min(noise, 100) / 100 * 48)
+    oled.rect(80, 28, 46, 8, 1)
+    oled.fill_rect(81, 29, noise_w, 6, 1)
+    # 상태 표시
+    oled.hline(0, 40, 128, 1)
+    if status == "INTRUDER!":
+        oled.fill_rect(0, 42, 128, 22, 1)
+        oled.text("!! INTRUDER !!", 8, 48, 0)
+    elif status == "ALERT!":
+        oled.fill_rect(4, 44, 8, 8, 1)
+        oled.text("ALERT!", 16, 44)
+        oled.text("Check area", 16, 54)
+    else:
+        oled.rect(4, 44, 8, 8, 1)
+        oled.text("Safe", 16, 44)
+        oled.text("Monitoring...", 16, 54)
     oled.show()
 
     print(f"D:{dist:.0f}cm N:{noise:.0f}% [{status}]")
     time.sleep(0.3)`,
+          pcCode: `# PC 실시간 대시보드 — 간이 보안 시스템
+# 사용법: pip install pyserial matplotlib
+# 실행: python security_pc.py
+
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from collections import deque
+import numpy as np
+import time
+import re
+
+# ── 시리얼 연결 ──
+PORT = '/dev/tty.usbmodem1101'
+BAUD = 115200
+
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)
+
+# ── 데이터 버퍼 ──
+MAX_POINTS = 200
+idx_buf = deque(maxlen=MAX_POINTS)
+dist_buf = deque(maxlen=MAX_POINTS)
+noise_buf = deque(maxlen=MAX_POINTS)
+alert_log = deque(maxlen=20)
+count = 0
+
+# ── 그래프 설정 ──
+plt.style.use('dark_background')
+fig = plt.figure(figsize=(14, 7))
+gs = fig.add_gridspec(2, 3, hspace=0.35, wspace=0.3)
+ax_radar = fig.add_subplot(gs[0, 0], polar=True)
+ax_wave = fig.add_subplot(gs[0, 1:])
+ax_log = fig.add_subplot(gs[1, :])
+fig.suptitle('Security Monitor', fontsize=14, color='cyan')
+
+# 거리 레이더 스타일
+ax_radar.set_title('Proximity', color='lime', fontsize=10)
+ax_radar.set_ylim(0, 100)
+ax_radar.set_yticks([25, 50, 75, 100])
+ax_radar.set_yticklabels(['25', '50', '75', '100'], fontsize=7)
+theta = np.linspace(0, 2 * np.pi, 36)
+radar_line, = ax_radar.plot([], [], 'lime', linewidth=2)
+radar_fill = None
+
+# 소음 파형
+line_noise, = ax_wave.plot([], [], '#ff8800', linewidth=1)
+line_dist, = ax_wave.plot([], [], 'lime', linewidth=1)
+ax_wave.set_title('Distance & Noise', color='#ff8800', fontsize=10)
+ax_wave.set_ylim(0, 110)
+ax_wave.legend(['Noise %', 'Dist cm'], fontsize=8, loc='upper right')
+ax_wave.grid(True, alpha=0.3)
+
+# 알림 로그
+ax_log.set_title('Alert Log', color='red', fontsize=10)
+ax_log.axis('off')
+log_text = ax_log.text(0.02, 0.95, 'Waiting...', transform=ax_log.transAxes,
+                        fontsize=9, verticalalignment='top', color='gray',
+                        family='monospace')
+
+def update(frame):
+    global count, radar_fill
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line:
+            return
+        # 파싱: "D:45cm N:30% [Safe]"
+        m = re.match(r'D:(\\d+)cm N:(\\d+)% \\[(.+)\\]', line)
+        if not m:
+            return
+        dist = int(m.group(1))
+        noise = int(m.group(2))
+        status = m.group(3)
+        count += 1
+
+        idx_buf.append(count)
+        dist_buf.append(min(dist, 100))
+        noise_buf.append(noise)
+
+        # 알림 로그
+        if status != 'Safe':
+            alert_log.append(f'[{count:04d}] {status} D:{dist}cm N:{noise}%')
+
+        # 레이더 업데이트
+        r = max(5, 100 - min(dist, 100))
+        radar_data = np.full(36, r)
+        radar_line.set_data(theta, radar_data)
+        if radar_fill:
+            radar_fill.remove()
+        c = '#ff3333' if status == 'INTRUDER!' else '#ffaa00' if status == 'ALERT!' else '#00ff88'
+        radar_fill = ax_radar.fill(theta, radar_data, alpha=0.3, color=c)
+
+        # 파형 업데이트
+        x = list(idx_buf)
+        line_noise.set_data(x, list(noise_buf))
+        line_dist.set_data(x, list(dist_buf))
+        ax_wave.set_xlim(max(0, count - MAX_POINTS), count + 10)
+
+        # 로그 업데이트
+        log_str = '\\n'.join(list(alert_log)[-15:]) if alert_log else 'No alerts'
+        log_text.set_text(log_str)
+        log_text.set_color('#ff3333' if status != 'Safe' else 'gray')
+
+        fig.canvas.manager.set_window_title(f'Security — D:{dist}cm N:{noise}% [{status}]')
+    except:
+        pass
+
+ani = FuncAnimation(fig, update, interval=300, cache_frame_data=False)
+plt.tight_layout()
+plt.show()
+`,
         },
         {
           name: '종합 쾌적도 대시보드',
@@ -660,14 +1271,33 @@ while True:
     score = calc_comfort(temp, humi, light_pct, noise_pct)
     elapsed = time.ticks_diff(time.ticks_ms(), start) // 1000
 
+    # 개별 점수 계산 (대시보드용)
+    t_sc = 100 if 20 <= temp <= 26 else (70 if 18 <= temp <= 28 else 30)
+    h_sc = 100 if 40 <= humi <= 60 else (70 if 30 <= humi <= 70 else 30)
+    l_sc = 100 if 30 <= light_pct <= 70 else 50
+    n_sc = max(0, int(100 - noise_pct))
+
     # OLED 대시보드
     oled.fill(0)
-    oled.text("== Comfort ==", 12, 0)
-    oled.text(f"T:{temp}C H:{humi}%", 4, 14)
-    oled.text(f"L:{light_pct:.0f}% N:{noise_pct:.0f}%", 4, 26)
-    oled.text(f"Score: {score}/100", 4, 42)
-    # 점수 막대그래프
-    oled.fill_rect(4, 56, score, 6, 1)
+    # 헤더 바
+    oled.fill_rect(0, 0, 128, 12, 1)
+    oled.text("Comfort", 36, 2, 0)
+    oled.hline(0, 13, 128, 1)
+    # 4개 미니 바 (T/H/L/N 나란히)
+    labels = ['T', 'H', 'L', 'N']
+    scores = [t_sc, h_sc, l_sc, n_sc]
+    for i in range(4):
+        x = 4 + i * 32
+        oled.text(labels[i], x + 4, 16)
+        bar_h = int(scores[i] / 100 * 18)
+        oled.rect(x, 25, 12, 20, 1)
+        oled.fill_rect(x + 1, 44 - bar_h, 10, bar_h, 1)
+    # 종합 점수
+    oled.hline(0, 47, 128, 1)
+    oled.text(f"Score:{score}/100", 4, 50)
+    # 점수 프로그레스 바 (테두리)
+    oled.rect(4, 58, 120, 6, 1)
+    oled.fill_rect(5, 59, min(score, 100) * 118 // 100, 4, 1)
     oled.show()
 
     # CSV 저장
@@ -676,6 +1306,124 @@ while True:
 
     print(f"T:{temp} H:{humi} L:{light_pct:.0f} N:{noise_pct:.0f} => {score}점")
     time.sleep(2)`,
+          pcCode: `# PC 실시간 대시보드 — 종합 쾌적도 대시보드
+# 사용법: pip install pyserial matplotlib
+# 실행: python comfort_pc.py
+
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from collections import deque
+import numpy as np
+import time
+import re
+
+# ── 시리얼 연결 ──
+PORT = '/dev/tty.usbmodem1101'
+BAUD = 115200
+
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)
+
+# ── 데이터 버퍼 ──
+MAX_POINTS = 100
+idx_buf = deque(maxlen=MAX_POINTS)
+score_buf = deque(maxlen=MAX_POINTS)
+count = 0
+
+# 현재 개별 점수 저장
+current_scores = {'T': 0, 'H': 0, 'L': 0, 'N': 0}
+
+# ── 그래프 설정 ──
+plt.style.use('dark_background')
+fig = plt.figure(figsize=(14, 7))
+gs = fig.add_gridspec(2, 4, hspace=0.35, wspace=0.4)
+
+# 4개 게이지 (상단)
+ax_gauges = []
+gauge_colors = ['#ff4444', '#44aaff', '#ffcc00', '#44ff88']
+gauge_labels = ['Temp', 'Humi', 'Light', 'Noise']
+gauge_keys = ['T', 'H', 'L', 'N']
+gauge_bars = []
+
+for i in range(4):
+    ax = fig.add_subplot(gs[0, i])
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 100)
+    ax.set_title(gauge_labels[i], color=gauge_colors[i], fontsize=10)
+    bar = ax.bar(0.5, 0, width=0.6, color=gauge_colors[i], alpha=0.8)
+    ax.set_xticks([])
+    ax.axhline(y=70, color='white', linestyle=':', alpha=0.3)
+    ax.axhline(y=30, color='white', linestyle=':', alpha=0.3)
+    ax.grid(True, axis='y', alpha=0.2)
+    ax_gauges.append(ax)
+    gauge_bars.append(bar)
+
+# 점수 트렌드 (하단 전체)
+ax_trend = fig.add_subplot(gs[1, :])
+line_score, = ax_trend.plot([], [], 'cyan', linewidth=2, marker='o', markersize=3)
+ax_trend.set_title('Comfort Score Trend', color='cyan', fontsize=10)
+ax_trend.set_ylim(0, 100)
+ax_trend.set_xlabel('Sample')
+ax_trend.set_ylabel('Score')
+ax_trend.axhspan(80, 100, alpha=0.1, color='green', label='Excellent')
+ax_trend.axhspan(50, 80, alpha=0.1, color='yellow', label='Normal')
+ax_trend.axhspan(0, 50, alpha=0.1, color='red', label='Poor')
+ax_trend.legend(fontsize=8, loc='upper left')
+ax_trend.grid(True, alpha=0.3)
+score_text = ax_trend.text(0.98, 0.95, '', transform=ax_trend.transAxes,
+                            ha='right', va='top', fontsize=16, color='cyan')
+
+fig.suptitle('Comfort Dashboard', fontsize=14, color='cyan')
+
+def calc_sub_scores(temp, humi, light, noise):
+    t = 100 if 20 <= temp <= 26 else (70 if 18 <= temp <= 28 else 30)
+    h = 100 if 40 <= humi <= 60 else (70 if 30 <= humi <= 70 else 30)
+    l = 100 if 30 <= light <= 70 else 50
+    n = max(0, 100 - noise)
+    return {'T': t, 'H': h, 'L': l, 'N': int(n)}
+
+def update(frame):
+    global count
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line:
+            return
+        # 파싱: "T:24.5 H:55.2 L:45 N:20 => 82점"
+        m = re.match(r'T:([\\d.]+) H:([\\d.]+) L:(\\d+) N:(\\d+) => (\\d+)', line)
+        if not m:
+            return
+        temp = float(m.group(1))
+        humi = float(m.group(2))
+        light = float(m.group(3))
+        noise = float(m.group(4))
+        score = int(m.group(5))
+        count += 1
+
+        idx_buf.append(count)
+        score_buf.append(score)
+
+        subs = calc_sub_scores(temp, humi, light, noise)
+
+        # 게이지 업데이트
+        for i, key in enumerate(gauge_keys):
+            for rect in gauge_bars[i]:
+                rect.set_height(subs[key])
+
+        # 트렌드 업데이트
+        x = list(idx_buf)
+        line_score.set_data(x, list(score_buf))
+        ax_trend.set_xlim(max(0, count - MAX_POINTS), count + 5)
+        score_text.set_text(f'{score}/100')
+
+        fig.canvas.manager.set_window_title(f'Comfort — T:{temp} H:{humi} L:{light:.0f} N:{noise:.0f} => {score}')
+    except:
+        pass
+
+ani = FuncAnimation(fig, update, interval=2000, cache_frame_data=False)
+plt.tight_layout()
+plt.show()
+`,
         },
       ],
       requirements: [
@@ -712,6 +1460,140 @@ while True:
       aiRole: 'reviewer', codeStyle: 'feedback',
       prerequisite: 'Course A 1~13차시',
       textbookUrl: '/course-b/lv3/',
+      dataStorage: {
+        method: 'wifi-server',
+        title: 'WiFi 실시간 통신',
+        desc: 'WiFi로 PC/노트북 서버에 실시간 전송 — USB 케이블 없이 무선 모니터링',
+        icon: '📡',
+        setupGuide: '## WiFi 실시간 서버 설정\n\n### PC에서 Flask 서버 실행\n1. pip install flask flask-cors\n2. 아래 서버 코드를 server.py로 저장\n3. python server.py 실행\n4. 터미널에 표시되는 IP 주소를 Pico 코드에 입력',
+        serverCode: `# server.py — PC 실시간 데이터 수신 서버
+# pip install flask flask-cors
+
+from flask import Flask, request, jsonify, render_template_string
+from flask_cors import CORS
+from collections import deque
+from datetime import datetime
+import json
+
+app = Flask(__name__)
+CORS(app)
+
+# 데이터 저장 (최근 1000개)
+data_store = deque(maxlen=1000)
+
+@app.route('/api/data', methods=['POST'])
+def receive_data():
+    """Pico에서 보낸 데이터 수신"""
+    data = request.json
+    data['timestamp'] = datetime.now().isoformat()
+    data_store.append(data)
+    print(f"수신: {data}")
+    return jsonify({"status": "ok", "count": len(data_store)})
+
+@app.route('/api/data', methods=['GET'])
+def get_data():
+    """브라우저에서 데이터 조회"""
+    limit = request.args.get('limit', 100, type=int)
+    return jsonify(list(data_store)[-limit:])
+
+@app.route('/')
+def dashboard():
+    """간단한 웹 대시보드"""
+    return render_template_string("""
+<!DOCTYPE html>
+<html><head>
+<title>IoT Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: sans-serif; padding: 20px; }
+  .card { background: #1e293b; border-radius: 12px; padding: 16px; margin: 8px; }
+  h1 { color: #22d3ee; }
+</style>
+</head><body>
+<h1>IoT 실시간 대시보드</h1>
+<div class="card"><canvas id="chart"></canvas></div>
+<div class="card" id="latest">데이터 수신 대기 중...</div>
+<script>
+const ctx = document.getElementById('chart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: { labels: [], datasets: [] },
+  options: {
+    animation: false,
+    scales: { x: { display: false } },
+    plugins: { legend: { labels: { color: '#e2e8f0' } } }
+  }
+});
+
+setInterval(async () => {
+  const res = await fetch('/api/data?limit=60');
+  const data = await res.json();
+  if (data.length === 0) return;
+
+  const keys = Object.keys(data[0]).filter(k => k !== 'timestamp');
+  const colors = ['#22d3ee', '#fb923c', '#4ade80', '#a78bfa', '#f87171'];
+
+  chart.data.labels = data.map((_, i) => i);
+  chart.data.datasets = keys.map((key, i) => ({
+    label: key,
+    data: data.map(d => d[key]),
+    borderColor: colors[i % colors.length],
+    tension: 0.3,
+    pointRadius: 0,
+  }));
+  chart.update();
+
+  const latest = data[data.length - 1];
+  document.getElementById('latest').innerHTML =
+    keys.map(k => k + ': <b>' + latest[k] + '</b>').join(' | ');
+}, 2000);
+</script>
+</body></html>""")
+
+if __name__ == '__main__':
+    import socket
+    hostname = socket.gethostname()
+    ip = socket.gethostbyname(hostname)
+    print(f"\\n서버 시작: http://{ip}:5000")
+    print(f"대시보드: http://{ip}:5000")
+    print("Pico 코드의 SERVER 변수를 위 IP로 설정하세요\\n")
+    app.run(host='0.0.0.0', port=5000, debug=True)`,
+        picoTemplate: `# ── WiFi 연결 ──
+import network
+import urequests
+import json
+
+SSID = "학교WiFi"
+PASSWORD = "비밀번호"
+SERVER = "http://192.168.0.100:5000"  # PC의 IP 주소
+
+wlan = network.WLAN(network.STA_IF)
+wlan.active(True)
+wlan.connect(SSID, PASSWORD)
+
+print("WiFi 연결 중...")
+while not wlan.isconnected():
+    time.sleep(0.5)
+print("WiFi 연결 완료:", wlan.ifconfig()[0])
+
+send_count = 0
+
+def send_data(data_dict):
+    """PC 서버에 데이터 전송"""
+    global send_count
+    try:
+        r = urequests.post(f"{SERVER}/api/data",
+            json=data_dict,
+            headers={"Content-Type": "application/json"})
+        send_count += 1
+        print(f"전송 #{send_count} OK")
+        r.close()
+    except Exception as e:
+        print(f"전송 실패: {e}")
+
+# 메인 루프에서 사용 예시:
+# send_data({"temp": temp, "humi": humi, "light": light_pct})`,
+      },
       examples: [
         {
           name: '식물 성장 환경 분석',
@@ -747,6 +1629,7 @@ f = open(LOG_FILE, "a")
 f.write("측정번호,경과시간(분),온도(C),습도(%),광량(%)\\n")
 count = 0
 start = time.ticks_ms()
+temp_hist = []  # 온도 트렌드 (최대 40개)
 
 # ── 장기 데이터 수집 루프 ──
 while True:
@@ -755,13 +1638,34 @@ while True:
     count += 1
     elapsed_min = time.ticks_diff(time.ticks_ms(), start) // 60000
 
+    # 이력 저장
+    temp_hist.append(int(temp))
+    if len(temp_hist) > 40:
+        temp_hist.pop(0)
+
     # OLED 연구 대시보드
     oled.fill(0)
-    oled.text("Plant Research", 8, 0)
-    oled.text(f"#{count} ({elapsed_min}min)", 4, 14)
-    oled.text(f"T:{temp}C H:{humi}%", 4, 28)
-    oled.text(f"Light: {light_pct}%", 4, 40)
-    oled.text(f"Next: {MEASURE_INTERVAL}s", 4, 54)
+    # 헤더 바
+    oled.fill_rect(0, 0, 128, 12, 1)
+    oled.text("Plant Lab", 28, 2, 0)
+    oled.hline(0, 13, 128, 1)
+    # 측정 정보
+    oled.text(f"#{count}", 4, 16)
+    oled.text(f"{elapsed_min}min", 80, 16)
+    # 센서 값
+    oled.text(f"T:{temp}C", 4, 28)
+    oled.text(f"L:{light_pct}%", 72, 28)
+    # 온도 트렌드 그래프
+    oled.hline(0, 40, 128, 1)
+    oled.text("Trend", 0, 42)
+    if len(temp_hist) > 1:
+        t_min = min(temp_hist)
+        t_max = max(temp_hist)
+        t_range = max(t_max - t_min, 1)
+        for i in range(len(temp_hist)):
+            h = int((temp_hist[i] - t_min) / t_range * 16)
+            x = 44 + i * 2
+            oled.vline(x, 62 - h, max(h, 1), 1)
     oled.show()
 
     # CSV 저장
@@ -770,6 +1674,83 @@ while True:
 
     print(f"#{count} | {elapsed_min}분 | T:{temp} H:{humi} L:{light_pct}%")
     time.sleep(MEASURE_INTERVAL)`,
+          pcCode: `# PC 실시간 대시보드 — 식물 성장 환경 분석
+# 사용법: pip install pyserial matplotlib
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from matplotlib.widgets import Button
+from collections import deque
+import time, csv
+
+PORT = '/dev/tty.usbmodem1101'  # 환경에 맞게 수정
+BAUD = 115200
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)
+
+MAX_POINTS = 200
+times = deque(maxlen=MAX_POINTS)
+temps = deque(maxlen=MAX_POINTS)
+humis = deque(maxlen=MAX_POINTS)
+lights = deque(maxlen=MAX_POINTS)
+
+plt.style.use('dark_background')
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7))
+fig.suptitle('Plant Growth Environment', fontsize=14, color='cyan')
+
+# CSV 내보내기 버튼
+csv_file = 'plant_pc_log.csv'
+def export_csv(event):
+    with open(csv_file, 'w', newline='') as f:
+        w = csv.writer(f)
+        w.writerow(['time_min', 'temp', 'humi', 'light_pct'])
+        for i in range(len(times)):
+            w.writerow([f'{times[i]:.1f}', f'{temps[i]:.1f}',
+                        f'{humis[i]:.1f}', f'{lights[i]:.1f}'])
+    print(f'Saved {len(times)} rows to {csv_file}')
+ax_btn = plt.axes([0.81, 0.01, 0.15, 0.04])
+btn = Button(ax_btn, 'Export CSV', color='#333', hovercolor='#555')
+btn.on_clicked(export_csv)
+
+def update(frame):
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line or not line.startswith('#'): return
+        # 파싱: #1 | 0분 | T:24.5 H:55.2 L:72.3%
+        parts = line.split('|')
+        elapsed = float(parts[1].strip().replace('분', ''))
+        vals = parts[2].strip().split()
+        t = float(vals[0].split(':')[1])
+        h = float(vals[1].split(':')[1])
+        l = float(vals[2].split(':')[1].replace('%', ''))
+        times.append(elapsed)
+        temps.append(t)
+        humis.append(h)
+        lights.append(l)
+
+        ax1.clear()
+        ax1.set_title('Temperature & Humidity')
+        ax1.set_ylabel('Temperature (C)', color='#ff6b6b')
+        ax1.plot(list(times), list(temps), color='#ff6b6b', linewidth=2, label='Temp')
+        ax1.tick_params(axis='y', labelcolor='#ff6b6b')
+        ax1r = ax1.twinx()
+        ax1r.set_ylabel('Humidity (%)', color='#4ecdc4')
+        ax1r.plot(list(times), list(humis), color='#4ecdc4', linewidth=2, label='Humi')
+        ax1r.tick_params(axis='y', labelcolor='#4ecdc4')
+        ax1.set_xlabel('Time (min)')
+
+        ax2.clear()
+        ax2.set_title('Light Level')
+        ax2.fill_between(list(times), list(lights), alpha=0.3, color='#ffe66d')
+        ax2.plot(list(times), list(lights), color='#ffe66d', linewidth=2)
+        ax2.set_ylabel('Light (%)')
+        ax2.set_xlabel('Time (min)')
+        ax2.set_ylim(0, 100)
+    except: pass
+
+ani = FuncAnimation(fig, update, interval=1000, cache_frame_data=False)
+plt.tight_layout(rect=[0, 0.05, 1, 0.95])
+plt.show()`,
         },
         {
           name: 'CO2 농도와 수업 집중도',
@@ -819,6 +1800,7 @@ f = open(LOG_FILE, "a")
 f.write("측정번호,경과시간(분),CO2(ppm),온도(C),상태\\n")
 count = 0
 start = time.ticks_ms()
+co2_hist = []  # CO2 트렌드 (최대 40개)
 
 # ── 장기 데이터 수집 루프 ──
 while True:
@@ -827,13 +1809,34 @@ while True:
     count += 1
     elapsed_min = time.ticks_diff(time.ticks_ms(), start) // 60000
 
+    # 이력 저장
+    co2_hist.append(co2)
+    if len(co2_hist) > 40:
+        co2_hist.pop(0)
+
     # OLED 연구 대시보드
     oled.fill(0)
-    oled.text("CO2 Research", 16, 0)
-    oled.text(f"#{count} ({elapsed_min}min)", 4, 14)
-    oled.text(f"CO2: {co2} ppm", 4, 28)
-    oled.text(f"Temp: {temp} C", 4, 40)
-    oled.text(f"[{status}]", 4, 54)
+    # 헤더 바
+    oled.fill_rect(0, 0, 128, 12, 1)
+    oled.text("CO2 Lab", 36, 2, 0)
+    oled.hline(0, 13, 128, 1)
+    # CO2 값 크게 표시
+    oled.text(f"{co2}ppm", 4, 16)
+    oled.text(f"T:{temp}C", 84, 16)
+    # 상태 표시 (zone)
+    zone = "+" if co2 < 600 else ("++" if co2 < 1000 else ("+++" if co2 < 1500 else "!!!!"))
+    oled.text(f"[{status}] {zone}", 4, 28)
+    # CO2 트렌드 그래프
+    oled.hline(0, 40, 128, 1)
+    oled.text("Trend", 0, 42)
+    if len(co2_hist) > 1:
+        c_min = min(co2_hist)
+        c_max = max(co2_hist)
+        c_range = max(c_max - c_min, 1)
+        for i in range(len(co2_hist)):
+            h = int((co2_hist[i] - c_min) / c_range * 16)
+            x = 44 + i * 2
+            oled.vline(x, 62 - h, max(h, 1), 1)
     oled.show()
 
     # CSV 저장
@@ -842,6 +1845,74 @@ while True:
 
     print(f"#{count} | {elapsed_min}분 | CO2:{co2}ppm T:{temp}C [{status}]")
     time.sleep(MEASURE_INTERVAL)`,
+          pcCode: `# PC 실시간 대시보드 — CO2 농도와 수업 집중도
+# 사용법: pip install pyserial matplotlib
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from collections import deque
+import time
+
+PORT = '/dev/tty.usbmodem1101'  # 환경에 맞게 수정
+BAUD = 115200
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)
+
+MAX_POINTS = 300
+times = deque(maxlen=MAX_POINTS)
+co2s = deque(maxlen=MAX_POINTS)
+temps_data = deque(maxlen=MAX_POINTS)
+
+plt.style.use('dark_background')
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7), gridspec_kw={'height_ratios': [3, 1]})
+fig.suptitle('CO2 Concentration Monitor', fontsize=14, color='cyan')
+
+def update(frame):
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line or not line.startswith('#'): return
+        # 파싱: #1 | 0분 | CO2:800ppm T:24.5C [Good]
+        parts = line.split('|')
+        elapsed = float(parts[1].strip().replace('분', ''))
+        vals = parts[2].strip()
+        co2 = int(vals.split('CO2:')[1].split('ppm')[0])
+        t = float(vals.split('T:')[1].split('C')[0])
+        times.append(elapsed)
+        co2s.append(co2)
+        temps_data.append(t)
+
+        ax1.clear()
+        ax1.set_title('CO2 Concentration (ppm)', fontsize=11)
+        t_list = list(times)
+        c_list = list(co2s)
+        # 존 배경색
+        ax1.axhspan(0, 600, alpha=0.15, color='green', label='Good (<600)')
+        ax1.axhspan(600, 1000, alpha=0.15, color='yellow', label='Fair (600-1000)')
+        ax1.axhspan(1000, 1500, alpha=0.15, color='orange', label='Poor (1000-1500)')
+        ax1.axhspan(1500, 3000, alpha=0.12, color='red', label='Vent! (>1500)')
+        ax1.plot(t_list, c_list, color='white', linewidth=2)
+        ax1.fill_between(t_list, c_list, alpha=0.2, color='cyan')
+        ax1.set_ylabel('CO2 (ppm)')
+        ax1.set_ylim(300, max(1600, max(c_list) + 100) if c_list else 1600)
+        ax1.legend(fontsize=8, loc='upper left')
+        ax1.grid(True, alpha=0.3)
+        # 현재 값 표시
+        if c_list:
+            ax1.text(0.98, 0.95, f'{c_list[-1]} ppm', transform=ax1.transAxes,
+                     ha='right', va='top', fontsize=18, color='cyan',
+                     fontweight='bold')
+
+        ax2.clear()
+        ax2.set_title('Temperature', fontsize=10)
+        ax2.plot(t_list, list(temps_data), color='#ff6b6b', linewidth=1.5)
+        ax2.set_ylabel('Temp (C)')
+        ax2.set_xlabel('Time (min)')
+        ax2.grid(True, alpha=0.3)
+    except: pass
+
+ani = FuncAnimation(fig, update, interval=1000, cache_frame_data=False)
+plt.tight_layout()
+plt.show()`,
         },
         {
           name: '운동 강도와 가속도 패턴',
@@ -885,6 +1956,7 @@ def classify_motion(magnitude):
 f = open("motion_log.csv", "a")
 f.write("time_ms,ax,ay,az,magnitude,motion\\n")
 start = time.ticks_ms()
+mag_hist = []  # 가속도 크기 파형 (최대 60개)
 
 # ── 메인 루프 ──
 while True:
@@ -893,13 +1965,32 @@ while True:
     motion = classify_motion(mag)
     elapsed = time.ticks_diff(time.ticks_ms(), start)
 
+    # 이력 저장
+    mag_hist.append(mag)
+    if len(mag_hist) > 60:
+        mag_hist.pop(0)
+
     # OLED 대시보드
     oled.fill(0)
-    oled.text("Motion Track", 16, 0)
-    oled.text(f"X:{ax:.1f} Y:{ay:.1f}", 4, 14)
-    oled.text(f"Z:{az:.1f}", 4, 26)
-    oled.text(f"G: {mag:.2f}", 4, 40)
-    oled.text(f"[{motion}]", 4, 54)
+    # 헤더 바
+    oled.fill_rect(0, 0, 128, 12, 1)
+    oled.text("Motion Lab", 24, 2, 0)
+    oled.hline(0, 13, 128, 1)
+    # 3축 값 컴팩트
+    oled.text(f"X:{ax:.1f}", 0, 16)
+    oled.text(f"Y:{ay:.1f}", 44, 16)
+    oled.text(f"Z:{az:.1f}", 88, 16)
+    # 크기 + 분류
+    oled.text(f"G:{mag:.2f}", 4, 28)
+    oled.text(f"[{motion}]", 72, 28)
+    # 실시간 파형 (60포인트, y=40~62)
+    oled.hline(0, 39, 128, 1)
+    if len(mag_hist) > 1:
+        m_max = max(max(mag_hist), 2.0)
+        for i in range(len(mag_hist)):
+            h = int(min(mag_hist[i] / m_max, 1.0) * 22)
+            x = 4 + i * 2
+            oled.vline(x, 62 - h, max(h, 1), 1)
     oled.show()
 
     # CSV 저장
@@ -908,6 +1999,87 @@ while True:
 
     print(f"G:{mag:.2f} [{motion}]")
     time.sleep(0.2)`,
+          pcCode: `# PC 실시간 대시보드 — 운동 강도와 가속도 패턴
+# 사용법: pip install pyserial matplotlib
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from collections import deque
+import time
+
+PORT = '/dev/tty.usbmodem1101'  # 환경에 맞게 수정
+BAUD = 115200
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)
+
+MAX_POINTS = 200
+mag_buf = deque(maxlen=MAX_POINTS)
+idx_buf = deque(maxlen=MAX_POINTS)
+count = 0
+current_label = 'Idle'
+
+plt.style.use('dark_background')
+fig, (ax_xyz, ax_mag) = plt.subplots(2, 1, figsize=(12, 7))
+fig.suptitle('Motion Accelerometer Dashboard', fontsize=14, color='cyan')
+
+# 분류 결과 텍스트
+label_text = fig.text(0.98, 0.02, 'Idle', fontsize=20, color='lime',
+                       ha='right', va='bottom', fontweight='bold')
+
+def update(frame):
+    global count, current_label
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line: return
+        # 파싱: G:1.23 [Walk]
+        if not line.startswith('G:'): return
+        parts = line.split()
+        g_val = float(parts[0].split(':')[1])
+        label = parts[1].strip('[]')
+        current_label = label
+        count += 1
+        idx_buf.append(count)
+        mag_buf.append(g_val)
+
+        ax_mag.clear()
+        ax_mag.set_title('Magnitude (G)', fontsize=11)
+        x = list(idx_buf)
+        m = list(mag_buf)
+        ax_mag.plot(x, m, color='cyan', linewidth=1.5)
+        ax_mag.fill_between(x, m, alpha=0.2, color='cyan')
+        ax_mag.axhline(y=1.2, color='green', linestyle=':', alpha=0.5, label='Walk')
+        ax_mag.axhline(y=2.0, color='yellow', linestyle=':', alpha=0.5, label='Run')
+        ax_mag.axhline(y=4.0, color='red', linestyle=':', alpha=0.5, label='Jump')
+        ax_mag.set_ylabel('G-force')
+        ax_mag.set_xlabel('Sample')
+        ax_mag.legend(fontsize=8, loc='upper left')
+        ax_mag.grid(True, alpha=0.3)
+        ax_mag.set_ylim(0, max(5, max(m) + 0.5) if m else 5)
+
+        # 분류 결과 색상
+        colors = {'Idle': '#888888', 'Walk': '#44ff44', 'Run': '#ffcc00', 'Jump': '#ff4444'}
+        label_text.set_text(current_label)
+        label_text.set_color(colors.get(current_label, 'white'))
+
+        # 최근 분류 히스토그램
+        recent = list(mag_buf)[-50:]
+        ax_xyz.clear()
+        ax_xyz.set_title('Recent Motion Classification (last 50)', fontsize=11)
+        classes = {'Idle': 0, 'Walk': 0, 'Run': 0, 'Jump': 0}
+        for v in recent:
+            if v < 1.2: classes['Idle'] += 1
+            elif v < 2.0: classes['Walk'] += 1
+            elif v < 4.0: classes['Run'] += 1
+            else: classes['Jump'] += 1
+        bars = ax_xyz.bar(classes.keys(), classes.values(),
+                          color=['#888888', '#44ff44', '#ffcc00', '#ff4444'])
+        ax_xyz.set_ylabel('Count')
+        ax_xyz.grid(True, axis='y', alpha=0.3)
+    except: pass
+
+ani = FuncAnimation(fig, update, interval=50, cache_frame_data=False)
+plt.tight_layout()
+plt.show()`,
         },
       ],
       requirements: [
@@ -942,6 +2114,172 @@ while True:
       aiRole: 'reviewer', codeStyle: 'feedback',
       prerequisite: 'Course A 전체 + Course B Lv.1~3',
       textbookUrl: '/course-b/lv4/',
+      dataStorage: {
+        method: 'supabase',
+        title: 'Supabase 클라우드',
+        desc: '클라우드 DB에 실시간 저장 — 전시 대시보드와 연동',
+        icon: '☁️',
+        setupGuide: '## Supabase 클라우드 설정\n\n### 1단계: Supabase 프로젝트 생성\n1. supabase.com에 가입 (무료)\n2. New Project 생성\n3. Settings → API에서 URL과 anon key 복사\n\n### 2단계: 테이블 생성\nSQL Editor에서:\n\nCREATE TABLE sensor_data (\n  id BIGSERIAL PRIMARY KEY,\n  created_at TIMESTAMPTZ DEFAULT NOW(),\n  device_id TEXT DEFAULT \'pico-01\',\n  temp REAL,\n  humi REAL,\n  co2 INTEGER,\n  light REAL,\n  sound REAL,\n  dust REAL,\n  extra JSONB\n);\n\n-- 실시간 구독 활성화\nALTER TABLE sensor_data REPLICA IDENTITY FULL;\n\n### 3단계: 보안\n- Row Level Security (RLS) 활성화\n- INSERT 정책 추가: anon 역할 허용\n- SELECT 정책 추가: anon 역할 허용\n\n⚠️ anon key는 읽기/쓰기용 공개 키입니다. 비밀번호가 아닙니다.',
+        picoTemplate: `# ── WiFi + Supabase 연결 ──
+import network
+import urequests
+import json
+
+SSID = "학교WiFi"
+PASSWORD = "비밀번호"
+
+# Supabase 설정
+SUPABASE_URL = "https://여기에프로젝트ID.supabase.co"
+SUPABASE_KEY = "여기에_anon_key"
+
+wlan = network.WLAN(network.STA_IF)
+wlan.active(True)
+wlan.connect(SSID, PASSWORD)
+
+print("WiFi 연결 중...")
+while not wlan.isconnected():
+    time.sleep(0.5)
+print("WiFi 연결 완료:", wlan.ifconfig()[0])
+
+def send_to_supabase(data_dict, table="sensor_data"):
+    """Supabase에 데이터 전송"""
+    try:
+        r = urequests.post(
+            f"{SUPABASE_URL}/rest/v1/{table}",
+            json=data_dict,
+            headers={
+                "Content-Type": "application/json",
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Prefer": "return=minimal"
+            })
+        print(f"Supabase 전송 OK ({r.status_code})")
+        r.close()
+    except Exception as e:
+        print(f"전송 실패: {e}")
+
+# 메인 루프에서 사용 예시:
+# send_to_supabase({"temp": temp, "humi": humi, "co2": co2, "device_id": "pico-01"})`,
+        dashboardCode: `<!-- Supabase 실시간 대시보드 (HTML 파일로 저장) -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>IoT Cloud Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  * { margin: 0; box-sizing: border-box; }
+  body { background: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; }
+  .header { padding: 16px 24px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #1e293b; }
+  .header h1 { font-size: 18px; color: #22d3ee; }
+  .status { padding: 4px 12px; border-radius: 20px; font-size: 12px; }
+  .status.on { background: #065f4620; color: #4ade80; border: 1px solid #4ade8040; }
+  .status.off { background: #7f1d1d20; color: #f87171; border: 1px solid #f8717140; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 16px 24px; }
+  .card { background: #1e293b; border-radius: 16px; padding: 20px; border: 1px solid #334155; }
+  .card .label { font-size: 13px; color: #94a3b8; margin-bottom: 4px; }
+  .card .value { font-size: 36px; font-weight: bold; font-family: monospace; }
+  .card .unit { font-size: 14px; color: #64748b; margin-left: 4px; }
+  .chart-container { padding: 16px 24px; }
+  .chart-card { background: #1e293b; border-radius: 16px; padding: 20px; border: 1px solid #334155; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>☁️ IoT Cloud Dashboard</h1>
+  <span class="status off" id="status">연결 중...</span>
+  <span style="margin-left:auto;font-size:13px;color:#64748b" id="count">0 데이터</span>
+</div>
+<div class="grid" id="cards"></div>
+<div class="chart-container">
+  <div class="chart-card"><canvas id="chart" height="300"></canvas></div>
+</div>
+
+<script>
+const SUPABASE_URL = '여기에_URL';
+const SUPABASE_KEY = '여기에_anon_key';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const colors = { temp:'#f87171', humi:'#22d3ee', co2:'#fb923c', light:'#facc15', sound:'#a78bfa', dust:'#4ade80' };
+const units = { temp:'°C', humi:'%', co2:'ppm', light:'%', sound:'dB', dust:'μg/m³' };
+
+const ctx = document.getElementById('chart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: { labels: [], datasets: [] },
+  options: {
+    animation: false,
+    responsive: true,
+    scales: {
+      x: { display: false },
+      y: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } }
+    },
+    plugins: { legend: { labels: { color: '#e2e8f0' } } }
+  }
+});
+
+async function loadData() {
+  const { data, error } = await supabase
+    .from('sensor_data')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (error) { console.error(error); return; }
+  const sorted = data.reverse();
+  updateCards(sorted[sorted.length - 1]);
+  updateChart(sorted);
+  document.getElementById('count').textContent = sorted.length + ' 데이터';
+}
+
+function updateCards(latest) {
+  if (!latest) return;
+  const grid = document.getElementById('cards');
+  const keys = Object.keys(latest).filter(k => !['id','created_at','device_id','extra'].includes(k) && latest[k] !== null);
+  grid.innerHTML = keys.map(k =>
+    '<div class="card"><div class="label">' + k + '</div>' +
+    '<div class="value" style="color:' + (colors[k]||'#e2e8f0') + '">' +
+    (typeof latest[k]==='number' ? latest[k].toFixed(1) : latest[k]) +
+    '<span class="unit">' + (units[k]||'') + '</span></div></div>'
+  ).join('');
+}
+
+function updateChart(data) {
+  const keys = Object.keys(data[0]).filter(k => !['id','created_at','device_id','extra'].includes(k) && typeof data[0][k] === 'number');
+  chart.data.labels = data.map((_, i) => i);
+  chart.data.datasets = keys.map(k => ({
+    label: k,
+    data: data.map(d => d[k]),
+    borderColor: colors[k] || '#e2e8f0',
+    tension: 0.3,
+    pointRadius: 0,
+  }));
+  chart.update();
+}
+
+// 실시간 구독
+supabase
+  .channel('sensor_realtime')
+  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sensor_data' }, (payload) => {
+    updateCards(payload.new);
+    loadData();
+    document.getElementById('status').className = 'status on';
+    document.getElementById('status').textContent = '실시간 수신 중';
+  })
+  .subscribe((status) => {
+    if (status === 'SUBSCRIBED') {
+      document.getElementById('status').className = 'status on';
+      document.getElementById('status').textContent = '연결됨';
+    }
+  });
+
+loadData();
+setInterval(loadData, 10000);
+</script>
+</body>
+</html>`,
+      },
       examples: [
         {
           name: '학교 공기질 모니터링',
@@ -1005,6 +2343,7 @@ f = open("air_quality.csv", "a")
 f.write("분,CO2,온도,습도,미세먼지,AQI점수,등급\\n")
 count = 0
 start = time.ticks_ms()
+aqi_hist = []  # AQI 트렌드 (최대 40개)
 
 # ── 메인 루프 ──
 while True:
@@ -1016,15 +2355,37 @@ while True:
     count += 1
     elapsed_min = time.ticks_diff(time.ticks_ms(), start) // 60000
 
+    # AQI 이력
+    aqi_hist.append(aqi)
+    if len(aqi_hist) > 40:
+        aqi_hist.pop(0)
+
     # OLED 이중 대시보드
     oled.fill(0)
-    oled.text("AirQ Monitor", 16, 0)
-    oled.text(f"CO2:{co2} Dust:{dust_ug:.0f}", 0, 12)
-    oled.text(f"T:{temp}C H:{humi}%", 4, 24)
-    oled.text(f"AQI: {aqi}/100", 4, 38)
-    oled.text(f"[{grade}]", 4, 50)
-    # AQI 막대
-    oled.fill_rect(4, 60, aqi, 3, 1)
+    # 외곽 프레임
+    oled.rect(0, 0, 128, 64, 1)
+    # 헤더 바
+    oled.fill_rect(1, 1, 126, 11, 1)
+    oled.text("Air Quality", 24, 2, 0)
+    # 왼쪽 패널: CO2 + Dust
+    oled.text(f"CO2:{co2}", 4, 14)
+    co2_w = min(int(co2 / 2000 * 40), 40)
+    oled.rect(4, 24, 42, 6, 1)
+    oled.fill_rect(5, 25, co2_w, 4, 1)
+    oled.text(f"D:{dust_ug:.0f}", 4, 32)
+    d_w = min(int(dust_ug / 200 * 40), 40)
+    oled.rect(4, 42, 42, 6, 1)
+    oled.fill_rect(5, 43, d_w, 4, 1)
+    # 오른쪽 패널: Temp + Humi
+    oled.vline(64, 13, 38, 1)
+    oled.text(f"T:{temp}C", 68, 14)
+    oled.text(f"H:{humi}%", 68, 26)
+    # AQI 스코어 바 (하단)
+    oled.hline(1, 50, 126, 1)
+    oled.text(f"AQI:{aqi}", 4, 53)
+    oled.text(f"[{grade}]", 76, 53)
+    aqi_w = int(aqi / 100 * 120)
+    oled.fill_rect(4, 62, aqi_w, 1, 1)
     oled.show()
 
     # CSV + Serial (PC 이중 대시보드)
@@ -1033,6 +2394,106 @@ while True:
     # Serial 출력 (PC 실시간 그래프용)
     print(f"CO2:{co2},T:{temp},H:{humi},D:{dust_ug:.0f},AQI:{aqi}")
     time.sleep(10)`,
+          pcCode: `# PC 실시간 대시보드 — 학교 공기질 모니터링
+# 사용법: pip install pyserial matplotlib
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from collections import deque
+import time
+
+PORT = '/dev/tty.usbmodem1101'  # 환경에 맞게 수정
+BAUD = 115200
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)
+
+MAX_POINTS = 200
+idx = deque(maxlen=MAX_POINTS)
+co2s = deque(maxlen=MAX_POINTS)
+dusts = deque(maxlen=MAX_POINTS)
+temps_d = deque(maxlen=MAX_POINTS)
+humis_d = deque(maxlen=MAX_POINTS)
+aqis = deque(maxlen=MAX_POINTS)
+count = 0
+
+plt.style.use('dark_background')
+fig, ((ax_co2, ax_dust), (ax_th, ax_aqi)) = plt.subplots(2, 2, figsize=(14, 8))
+fig.suptitle('Air Quality Monitoring Station', fontsize=14, color='cyan')
+
+def update(frame):
+    global count
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line or not line.startswith('CO2:'): return
+        # 파싱: CO2:800,T:24.5,H:55,D:25,AQI:85
+        parts = dict(p.split(':') for p in line.split(','))
+        co2 = int(parts['CO2'])
+        temp = float(parts['T'])
+        humi = float(parts['H'])
+        dust = float(parts['D'])
+        aqi = int(parts['AQI'])
+        count += 1
+        idx.append(count)
+        co2s.append(co2)
+        dusts.append(dust)
+        temps_d.append(temp)
+        humis_d.append(humi)
+        aqis.append(aqi)
+
+        x = list(idx)
+
+        # CO2 차트
+        ax_co2.clear()
+        ax_co2.set_title('CO2 (ppm)', color='#ff6b6b')
+        ax_co2.axhspan(0, 600, alpha=0.1, color='green')
+        ax_co2.axhspan(600, 1000, alpha=0.1, color='yellow')
+        ax_co2.axhspan(1000, 1500, alpha=0.1, color='orange')
+        ax_co2.axhspan(1500, 3000, alpha=0.1, color='red')
+        ax_co2.plot(x, list(co2s), color='#ff6b6b', linewidth=2)
+        ax_co2.set_ylim(300, max(1600, max(co2s) + 100) if co2s else 1600)
+        ax_co2.grid(True, alpha=0.3)
+
+        # Dust 차트
+        ax_dust.clear()
+        ax_dust.set_title('Dust (ug/m3)', color='#ffaa44')
+        ax_dust.axhspan(0, 35, alpha=0.1, color='green')
+        ax_dust.axhspan(35, 75, alpha=0.1, color='yellow')
+        ax_dust.axhspan(75, 500, alpha=0.1, color='red')
+        ax_dust.plot(x, list(dusts), color='#ffaa44', linewidth=2)
+        ax_dust.grid(True, alpha=0.3)
+
+        # Temp/Humi 차트
+        ax_th.clear()
+        ax_th.set_title('Temp & Humidity', color='#4ecdc4')
+        ax_th.plot(x, list(temps_d), color='#ff6b6b', linewidth=1.5, label='Temp(C)')
+        ax_th_r = ax_th.twinx()
+        ax_th_r.plot(x, list(humis_d), color='#4ecdc4', linewidth=1.5, label='Humi(%)')
+        ax_th.set_ylabel('Temp', color='#ff6b6b')
+        ax_th_r.set_ylabel('Humi', color='#4ecdc4')
+        ax_th.legend(loc='upper left', fontsize=8)
+        ax_th_r.legend(loc='upper right', fontsize=8)
+        ax_th.grid(True, alpha=0.3)
+
+        # AQI 트렌드
+        ax_aqi.clear()
+        ax_aqi.set_title('AQI Score', color='cyan')
+        aqi_list = list(aqis)
+        ax_aqi.axhspan(80, 100, alpha=0.1, color='green')
+        ax_aqi.axhspan(60, 80, alpha=0.1, color='yellow')
+        ax_aqi.axhspan(40, 60, alpha=0.1, color='orange')
+        ax_aqi.axhspan(0, 40, alpha=0.1, color='red')
+        ax_aqi.plot(x, aqi_list, color='cyan', linewidth=2)
+        ax_aqi.fill_between(x, aqi_list, alpha=0.15, color='cyan')
+        ax_aqi.set_ylim(0, 100)
+        ax_aqi.grid(True, alpha=0.3)
+        if aqi_list:
+            ax_aqi.text(0.98, 0.95, f'{aqi_list[-1]}', transform=ax_aqi.transAxes,
+                        ha='right', va='top', fontsize=20, color='cyan')
+    except: pass
+
+ani = FuncAnimation(fig, update, interval=1000, cache_frame_data=False)
+plt.tight_layout()
+plt.show()`,
         },
         {
           name: '교실 에너지 절약 자동화',
@@ -1100,11 +2561,24 @@ while True:
 
     # OLED 대시보드
     oled.fill(0)
-    oled.text("Energy Saver", 16, 0)
-    oled.text(f"T:{temp}C L:{light_pct:.0f}%", 4, 14)
-    oled.text(f"Person: {'O' if occupied else 'X'}", 4, 26)
-    oled.text(f"Relay: {'ON' if relay_on else 'OFF'}", 4, 38)
-    oled.text(f"Saved: {save_seconds//60}min", 4, 50)
+    # 외곽 프레임
+    oled.rect(0, 0, 128, 64, 1)
+    # 헤더 바
+    oled.fill_rect(1, 1, 126, 11, 1)
+    oled.text("EnergySaver", 20, 2, 0)
+    # 상태 아이콘 행
+    person_icon = "\\x7f" if occupied else "\\x5f"
+    relay_icon = "\\x10" if relay_on else "\\x11"
+    oled.text(f"Person:{'Y' if occupied else 'N'}", 4, 14)
+    oled.text(f"Relay:{'ON' if relay_on else'OFF'}", 4, 24)
+    # 조도 레벨 바
+    oled.text(f"Light:{light_pct:.0f}%", 4, 36)
+    l_w = int(min(light_pct, 100) / 100 * 56)
+    oled.rect(68, 36, 58, 8, 1)
+    oled.fill_rect(69, 37, l_w, 6, 1)
+    # 절약 카운터 크게
+    oled.hline(1, 48, 126, 1)
+    oled.text(f"Saved:{save_seconds//60}min", 4, 52)
     oled.show()
 
     # CSV 저장
@@ -1113,6 +2587,89 @@ while True:
 
     print(f"T:{temp} L:{light_pct:.0f}% P:{'Y' if occupied else 'N'} R:{'ON' if relay_on else 'OFF'}")
     time.sleep(2)`,
+          pcCode: `# PC 실시간 대시보드 — 교실 에너지 절약 자동화
+# 사용법: pip install pyserial matplotlib
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from collections import deque
+import time
+
+PORT = '/dev/tty.usbmodem1101'  # 환경에 맞게 수정
+BAUD = 115200
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)
+
+MAX_POINTS = 300
+idx = deque(maxlen=MAX_POINTS)
+temps_d = deque(maxlen=MAX_POINTS)
+lights_d = deque(maxlen=MAX_POINTS)
+persons = deque(maxlen=MAX_POINTS)
+relays = deque(maxlen=MAX_POINTS)
+savings = []
+count = 0
+
+plt.style.use('dark_background')
+fig, (ax_timeline, ax_light, ax_save) = plt.subplots(3, 1, figsize=(12, 8),
+    gridspec_kw={'height_ratios': [2, 2, 1]})
+fig.suptitle('Energy Savings Dashboard', fontsize=14, color='cyan')
+
+def update(frame):
+    global count
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line or not line.startswith('T:'): return
+        # 파싱: T:24.5 L:65% P:Y R:ON
+        parts = line.split()
+        temp = float(parts[0].split(':')[1])
+        light = float(parts[1].split(':')[1].replace('%', ''))
+        person = 1 if parts[2].split(':')[1] == 'Y' else 0
+        relay = 1 if parts[3].split(':')[1] == 'ON' else 0
+        count += 1
+        idx.append(count)
+        temps_d.append(temp)
+        lights_d.append(light)
+        persons.append(person)
+        relays.append(relay)
+        x = list(idx)
+
+        # 타임라인: 사람감지 + 릴레이
+        ax_timeline.clear()
+        ax_timeline.set_title('Detection & Relay Timeline', fontsize=11)
+        ax_timeline.fill_between(x, list(persons), step='mid',
+                                  alpha=0.3, color='#44ff88', label='Person')
+        ax_timeline.fill_between(x, list(relays), step='mid',
+                                  alpha=0.3, color='#ff6b6b', label='Relay')
+        ax_timeline.set_ylabel('ON/OFF')
+        ax_timeline.set_ylim(-0.1, 1.5)
+        ax_timeline.legend(fontsize=8, loc='upper left')
+        ax_timeline.grid(True, alpha=0.3)
+
+        # 조도 차트
+        ax_light.clear()
+        ax_light.set_title('Light Level', fontsize=11, color='#ffe66d')
+        ax_light.plot(x, list(lights_d), color='#ffe66d', linewidth=1.5)
+        ax_light.fill_between(x, list(lights_d), alpha=0.2, color='#ffe66d')
+        ax_light.axhline(y=30, color='red', linestyle=':', alpha=0.5, label='Dark(<30%)')
+        ax_light.axhline(y=70, color='green', linestyle=':', alpha=0.5, label='Bright(>70%)')
+        ax_light.set_ylabel('Light (%)')
+        ax_light.set_ylim(0, 100)
+        ax_light.legend(fontsize=8)
+        ax_light.grid(True, alpha=0.3)
+
+        # 누적 절약 (릴레이 OFF일 때 절약으로 가정)
+        total_off = sum(1 for r in relays if r == 0)
+        total_on = sum(1 for r in relays if r == 1)
+        ax_save.clear()
+        ax_save.set_title('Relay Usage', fontsize=11)
+        ax_save.barh(['OFF (saving)', 'ON'], [total_off, total_on],
+                     color=['#44ff88', '#ff6b6b'])
+        ax_save.set_xlabel('Samples')
+    except: pass
+
+ani = FuncAnimation(fig, update, interval=500, cache_frame_data=False)
+plt.tight_layout()
+plt.show()`,
         },
         {
           name: '동작 분류 ML 시스템',
@@ -1157,12 +2714,20 @@ def collect_data(label, n_samples):
         ax, ay, az = read_accel()
         mag = math.sqrt(ax*ax + ay*ay + az*az)
         f.write(f"{ax:.3f},{ay:.3f},{az:.3f},{mag:.3f}\\n")
+        pct = int((i + 1) / n_samples * 100)
 
+        # OLED 수집 대시보드
         oled.fill(0)
-        oled.text(f"Collecting: {label}", 0, 0)
-        oled.text(f"{i+1}/{n_samples}", 4, 20)
-        # 진행 막대
-        oled.fill_rect(4, 40, int(i/n_samples*120), 8, 1)
+        oled.fill_rect(0, 0, 128, 12, 1)
+        oled.text("Collect", 36, 2, 0)
+        oled.hline(0, 13, 128, 1)
+        oled.text(f"Label: {label}", 4, 16)
+        oled.text(f"{i+1}/{n_samples}", 4, 28)
+        oled.text(f"{pct}%", 100, 28)
+        # 진행 막대 (프레임 + 채움)
+        oled.rect(4, 42, 120, 10, 1)
+        oled.fill_rect(5, 43, int(pct / 100 * 118), 8, 1)
+        oled.text(f"G:{mag:.2f}", 4, 56)
         oled.show()
 
         time.sleep(0.05)  # 20Hz 샘플링
@@ -1171,6 +2736,7 @@ def collect_data(label, n_samples):
     print(f"[{label}] {n_samples}개 수집 완료!")
 
 def predict_mode():
+    mag_hist = []  # 크기 파형 (최대 60개)
     # 간단한 규칙 기반 분류 (ML 모델 적용 전 테스트용)
     while True:
         ax, ay, az = read_accel()
@@ -1185,10 +2751,35 @@ def predict_mode():
         else:
             label = "Jump"
 
+        mag_hist.append(mag)
+        if len(mag_hist) > 60:
+            mag_hist.pop(0)
+
+        # OLED 예측 대시보드
         oled.fill(0)
-        oled.text("ML Predict", 24, 0)
-        oled.text(f"G: {mag:.2f}", 4, 20)
-        oled.text(f"=> {label}", 4, 40)
+        # 헤더 바
+        oled.fill_rect(0, 0, 128, 12, 1)
+        oled.text("ML Predict", 24, 2, 0)
+        oled.hline(0, 13, 128, 1)
+        # 크기 게이지 (수평 바)
+        oled.text(f"G:{mag:.2f}", 4, 16)
+        gauge_w = min(int(mag / 5.0 * 60), 60)
+        oled.rect(68, 16, 56, 8, 1)
+        # 게이지 표시선
+        oled.vline(68 + int(1.2/5*56), 16, 8, 1)
+        oled.vline(68 + int(2.0/5*56), 16, 8, 1)
+        oled.vline(68 + int(4.0/5*56), 16, 8, 1)
+        oled.fill_rect(69, 17, gauge_w, 6, 1)
+        # 분류 결과 크게
+        oled.text(f"=> {label}", 20, 28)
+        # 실시간 파형 (하단)
+        oled.hline(0, 39, 128, 1)
+        if len(mag_hist) > 1:
+            m_max = max(max(mag_hist), 2.0)
+            for i in range(len(mag_hist)):
+                h = int(min(mag_hist[i] / m_max, 1.0) * 22)
+                x = 4 + i * 2
+                oled.vline(x, 62 - h, max(h, 1), 1)
         oled.show()
 
         # Serial로 PC 전송 (ML 모델 연동용)
@@ -1200,6 +2791,128 @@ if MODE == "collect":
     collect_data(LABEL, SAMPLES)
 else:
     predict_mode()`,
+          pcCode: `# PC 실시간 대시보드 — 동작 분류 ML 시스템
+# 사용법: pip install pyserial matplotlib
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from collections import deque
+import time
+
+PORT = '/dev/tty.usbmodem1101'  # 환경에 맞게 수정
+BAUD = 115200
+ser = serial.Serial(PORT, BAUD, timeout=1)
+time.sleep(2)
+
+MAX_POINTS = 300
+ax_buf = deque(maxlen=MAX_POINTS)
+ay_buf = deque(maxlen=MAX_POINTS)
+az_buf = deque(maxlen=MAX_POINTS)
+mag_buf = deque(maxlen=MAX_POINTS)
+idx_buf = deque(maxlen=MAX_POINTS)
+count = 0
+current_label = 'Idle'
+label_counts = {'Idle': 0, 'Walk': 0, 'Shake': 0, 'Jump': 0}
+
+plt.style.use('dark_background')
+fig = plt.figure(figsize=(14, 8))
+gs = fig.add_gridspec(2, 2, hspace=0.35, wspace=0.3)
+ax_xyz = fig.add_subplot(gs[0, 0])
+ax_mag = fig.add_subplot(gs[0, 1])
+ax_class = fig.add_subplot(gs[1, 0])
+ax_conf = fig.add_subplot(gs[1, 1])
+fig.suptitle('Motion Classification ML Dashboard', fontsize=14, color='cyan')
+
+# 분류 결과 텍스트
+label_text = fig.text(0.5, 0.48, 'Idle', fontsize=24, color='lime',
+                       ha='center', va='center', fontweight='bold',
+                       bbox=dict(boxstyle='round', facecolor='#222', alpha=0.8))
+
+def update(frame):
+    global count, current_label
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if not line: return
+        parts = line.split(',')
+        if len(parts) != 5: return
+        # 파싱: ax,ay,az,mag,label
+        ax_v = float(parts[0])
+        ay_v = float(parts[1])
+        az_v = float(parts[2])
+        mag_v = float(parts[3])
+        label = parts[4]
+        current_label = label
+        count += 1
+        idx_buf.append(count)
+        ax_buf.append(ax_v)
+        ay_buf.append(ay_v)
+        az_buf.append(az_v)
+        mag_buf.append(mag_v)
+        if label in label_counts:
+            label_counts[label] += 1
+
+        x = list(idx_buf)
+
+        # 3축 파형
+        ax_xyz.clear()
+        ax_xyz.set_title('3-Axis Accelerometer', fontsize=10)
+        ax_xyz.plot(x, list(ax_buf), color='#ff4444', linewidth=1, alpha=0.8, label='X')
+        ax_xyz.plot(x, list(ay_buf), color='#44ff44', linewidth=1, alpha=0.8, label='Y')
+        ax_xyz.plot(x, list(az_buf), color='#4444ff', linewidth=1, alpha=0.8, label='Z')
+        ax_xyz.set_ylabel('G-force')
+        ax_xyz.legend(fontsize=8, loc='upper left')
+        ax_xyz.grid(True, alpha=0.3)
+
+        # 크기 + 임계선
+        ax_mag.clear()
+        ax_mag.set_title('Magnitude', fontsize=10, color='cyan')
+        m = list(mag_buf)
+        ax_mag.plot(x, m, color='cyan', linewidth=1.5)
+        ax_mag.fill_between(x, m, alpha=0.15, color='cyan')
+        ax_mag.axhline(y=1.1, color='#888', linestyle=':', alpha=0.5)
+        ax_mag.axhline(y=2.0, color='yellow', linestyle=':', alpha=0.5)
+        ax_mag.axhline(y=4.0, color='red', linestyle=':', alpha=0.5)
+        ax_mag.set_ylabel('G')
+        ax_mag.set_ylim(0, max(5, max(m) + 0.5) if m else 5)
+        ax_mag.grid(True, alpha=0.3)
+
+        # 분류 히스토그램
+        ax_class.clear()
+        ax_class.set_title('Classification Count', fontsize=10)
+        colors = {'Idle': '#888888', 'Walk': '#44ff44', 'Shake': '#ffcc00', 'Jump': '#ff4444'}
+        bars = ax_class.bar(label_counts.keys(), label_counts.values(),
+                            color=[colors[k] for k in label_counts.keys()])
+        ax_class.set_ylabel('Count')
+        ax_class.grid(True, axis='y', alpha=0.3)
+
+        # 실시간 분류 표시 (큰 텍스트)
+        label_colors = {'Idle': '#888888', 'Walk': '#44ff44', 'Shake': '#ffcc00', 'Jump': '#ff4444'}
+        label_text.set_text(current_label)
+        label_text.set_color(label_colors.get(current_label, 'white'))
+
+        # 최근 50개 분류 비율 (유사 신뢰도)
+        ax_conf.clear()
+        ax_conf.set_title('Recent 50 Distribution', fontsize=10)
+        recent = list(mag_buf)[-50:]
+        rc = {'Idle': 0, 'Walk': 0, 'Shake': 0, 'Jump': 0}
+        for v in recent:
+            if v < 1.1: rc['Idle'] += 1
+            elif v < 2.0: rc['Walk'] += 1
+            elif v < 4.0: rc['Shake'] += 1
+            else: rc['Jump'] += 1
+        total = max(sum(rc.values()), 1)
+        pcts = [rc[k]/total*100 for k in rc]
+        ax_conf.barh(list(rc.keys()), pcts,
+                     color=[colors[k] for k in rc.keys()])
+        ax_conf.set_xlabel('%')
+        ax_conf.set_xlim(0, 100)
+        for i, (k, p) in enumerate(zip(rc.keys(), pcts)):
+            ax_conf.text(p + 1, i, f'{p:.0f}%', va='center', fontsize=9)
+    except: pass
+
+ani = FuncAnimation(fig, update, interval=50, cache_frame_data=False)
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+plt.show()`,
         },
       ],
       requirements: [

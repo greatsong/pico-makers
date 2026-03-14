@@ -5,11 +5,23 @@ import LessonHeader from '../curriculum/LessonHeader';
 import ChatPanel from '../chat/ChatPanel';
 import RightPanel from './RightPanel';
 import ProgressBar from '../curriculum/ProgressBar';
+import ExhibitionMode from '../exhibition/ExhibitionMode';
 
 export default function AppShell() {
+  const mode = useAppStore(s => s.mode);
   const mobilePanel = useAppStore(s => s.mobilePanel);
   const setMobilePanel = useAppStore(s => s.setMobilePanel);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+
+  // 전시 모드: 헤더 + 풀스크린 대시보드
+  if (mode === 'exhibition') {
+    return (
+      <div className="h-dvh flex flex-col bg-bg-primary text-text-primary overflow-hidden">
+        <LessonHeader />
+        <ExhibitionMode />
+      </div>
+    );
+  }
 
   return (
     <div className="h-dvh flex flex-col bg-bg-primary text-text-primary overflow-hidden">

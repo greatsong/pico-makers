@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, Zap, BookOpen, Trophy, Rocket, Shield, Plug } from 'lucide-react';
+import { ChevronDown, Zap, BookOpen, Trophy, Rocket, Shield, Plug, Monitor } from 'lucide-react';
 import useAppStore from '../../stores/appStore';
 import useProgressStore from '../../stores/progressStore';
 import { ALL_LESSONS, CURRICULUM, getLessonByNum, getActForLesson } from '../../data/curriculum';
@@ -9,6 +9,7 @@ const MODE_OPTIONS = [
   { id: 'free', label: '자유 모드', icon: Zap, color: 'text-green' },
   { id: 'courseB', label: 'Course B', icon: Trophy, color: 'text-orange' },
   { id: 'hackathon', label: '해커톤', icon: Rocket, color: 'text-purple' },
+  { id: 'exhibition', label: '전시', icon: Monitor, color: 'text-pink' },
 ];
 
 export default function LessonHeader() {
@@ -150,6 +151,11 @@ export default function LessonHeader() {
       {/* 해커톤 라벨 */}
       {mode === 'hackathon' && (
         <span className="text-xs text-text-secondary">AI는 방향만 제시합니다</span>
+      )}
+
+      {/* 전시 모드 라벨 */}
+      {mode === 'exhibition' && (
+        <span className="text-xs text-text-secondary">실시간 IoT 대시보드</span>
       )}
 
       {/* 우측: Shield 토글 */}

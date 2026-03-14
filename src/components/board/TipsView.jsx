@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Lightbulb, AlertTriangle, BookOpen, CheckCircle, Cable, Zap, Info, ChevronDown } from 'lucide-react';
+import { Lightbulb, AlertTriangle, BookOpen, CheckCircle, Cable, Zap, Info, ChevronDown, Database, Copy, Check } from 'lucide-react';
 import useAppStore from '../../stores/appStore';
 import { getLessonByNum, getActForLesson, getCourseBLevel } from '../../data/curriculum';
 import { detectPinConflicts } from '../../lib/pinConflict';
@@ -335,6 +335,11 @@ function CourseBTips({ level }) {
         </div>
       </div>
 
+      {/* 데이터 저장 방법 */}
+      {levelData.dataStorage && (
+        <DataStorageSection storage={levelData.dataStorage} level={levelData.level} />
+      )}
+
       {/* 타임라인 */}
       {levelData.timeline && (
         <div className="bg-bg-primary rounded-xl border border-border overflow-hidden">
@@ -406,6 +411,97 @@ function CourseBTips({ level }) {
         </div>
       )}
     </>
+  );
+}
+
+/* ── 데이터 저장 방법 섹션 ── */
+function DataStorageSection({ storage, level }) {
+  const [showDetails, setShowDetails] = useState(false);
+  const [copiedKey, setCopiedKey] = useState(null);
+
+  const methodColors = {
+    csv: 'text-green',
+    'google-sheets': 'text-cyan',
+    'wifi-server': 'text-purple',
+    supabase: 'text-orange',
+  };
+
+  const methodBgs = {
+    csv: 'bg-green/10 border-green/30',
+    'google-sheets': 'bg-cyan/10 border-cyan/30',
+    'wifi-server': 'bg-purple/10 border-purple/30',
+    supabase: 'bg-orange/10 border-orange/30',
+  };
+
+  function handleCopy(text, key) {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  }
+
+  const color = methodColors[storage.method] || 'text-cyan';
+  const bg = methodBgs[storage.method] || 'bg-cyan/10 border-cyan/30';
+
+  const codeBlocks = [];
+  if (storage.picoTemplate) codeBlocks.push({ label: 'Pico 코드 (WiFi 연결)', key: 'pico', code: storage.picoTemplate });
+  if (storage.appsScriptCode) codeBlocks.push({ label: 'Google Apps Script', key: 'apps', code: storage.appsScriptCode });
+  if (storage.serverCode) codeBlocks.push({ label: 'PC 서버 코드 (Flask)', key: 'server', code: storage.serverCode });
+  if (storage.dashboardCode) codeBlocks.push({ label: '클라우드 대시보드 (HTML)', key: 'dashboard', code: storage.dashboardCode });
+
+  return (
+    <div className={`rounded-xl border p-3 ${bg}`}>
+      {/* 헤더 */}
+      <div className="flex items-center gap-2 mb-1.5">
+        <Database size={14} className={color} />
+        <span className={`text-xs font-medium ${color}`}>
+          {storage.icon} {storage.title}
+        </span>
+        <span className="text-[10px] text-text-muted ml-auto">Lv.{level}</span>
+      </div>
+      <p className="text-xs text-text-secondary mb-2">{storage.desc}</p>
+
+      {/* 상세 보기 토글 */}
+      {codeBlocks.length > 0 && (
+        <>
+          <button
+            onClick={() => setShowDetails(!showDetails)}
+            className={`w-full text-left flex items-center gap-1.5 text-[10px] font-medium ${color} hover:underline`}
+          >
+            <ChevronDown size={10} className={`transition-transform ${showDetails ? 'rotate-180' : ''}`} />
+            {showDetails ? '코드 숨기기' : '설정 가이드 & 코드 보기'}
+          </button>
+
+          {showDetails && (
+            <div className="mt-2 space-y-3">
+              {/* 설정 가이드 */}
+              {storage.setupGuide && (
+                <div className="bg-bg-primary/80 rounded-lg p-2.5 text-[10px] text-text-secondary whitespace-pre-line leading-relaxed">
+                  {storage.setupGuide}
+                </div>
+              )}
+
+              {/* 코드 블록들 */}
+              {codeBlocks.map(({ label, key, code }) => (
+                <div key={key} className="rounded-lg border border-border overflow-hidden">
+                  <div className="flex items-center justify-between px-2.5 py-1.5 bg-bg-surface border-b border-border">
+                    <span className="text-[10px] font-medium text-text-secondary">{label}</span>
+                    <button
+                      onClick={() => handleCopy(code, key)}
+                      className="p-1 rounded text-text-muted hover:text-cyan transition-colors"
+                    >
+                      {copiedKey === key ? <Check size={12} className="text-green" /> : <Copy size={12} />}
+                    </button>
+                  </div>
+                  <pre className="p-2 text-[10px] leading-4 overflow-x-auto bg-bg-primary max-h-[200px] overflow-y-auto">
+                    <code className="text-text-secondary">{code}</code>
+                  </pre>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
