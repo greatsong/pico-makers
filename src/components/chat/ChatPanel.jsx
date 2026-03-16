@@ -89,7 +89,7 @@ export default function ChatPanel() {
   function parseSensorAdditions(text) {
     const sensorMentions = {
       'DHT20': /DHT20|온습도\s*센서/i,
-      'SCD41': /SCD41|CO2\s*센서/i,
+      'SCD30': /SCD30|CO2\s*센서/i,
       'LIGHT': /빛\s*센서|조도\s*센서|light\s*sensor/i,
       'OLED': /OLED|디스플레이|SSD1306/i,
       'ULTRASONIC': /초음파\s*센서|ultrasonic/i,

@@ -84,11 +84,11 @@ export const CURRICULUM = {
         },
         {
           id: 'lesson-06', num: 6, title: '환경 모니터링 대시보드',
-          sensors: ['SCD41', 'DHT20'], devices: ['OLED'],
+          sensors: ['SCD30', 'DHT20'], devices: ['OLED'],
           question: '바이브 코딩으로 교실 환경 대시보드를 만들 수 있을까?',
           skills: ['멀티I2C', 'CO2기준', '환기판정'],
           difficulty: 3, duration: 50,
-          tips: ['CO2 1000ppm 이상이면 환기 필요', 'SCD41 첫 측정 5초 대기'],
+          tips: ['CO2 1000ppm 이상이면 환기 필요', 'SCD30 첫 측정 2초 대기'],
           suggestedQuestions: [
             'CO2 센서 배선을 알려주세요',
             'CO2 기준치가 얼마인가요?',
@@ -811,19 +811,31 @@ def send_to_sheets(data_dict):
       examples: [
         {
           name: '스마트 환기 시스템',
-          sensors: ['DHT20', 'SCD41', 'OLED'],
+          sensors: ['DHT20', 'SCD30', 'OLED'],
           desc: 'CO2+온습도 복합 판단으로 환기 알림',
           code: `from machine import I2C, Pin
-import time
+import time, struct
 
-# ── I2C 설정 (DHT20 + SCD41 + OLED 공유) ──
+# ── I2C 설정 (DHT20 + SCD30 + OLED 공유) ──
 i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
 dht_addr = 0x38
-scd_addr = 0x62
+scd_addr = 0x61
 time.sleep(0.1)
 
 from ssd1306 import SSD1306_I2C
 oled = SSD1306_I2C(128, 64, i2c)
+
+def crc8(data):
+    crc = 0xFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            if crc & 0x80:
+                crc = (crc << 1) ^ 0x31
+            else:
+                crc <<= 1
+            crc &= 0xFF
+    return crc
 
 def read_dht20():
     i2c.writeto(dht_addr, bytes([0xAC, 0x33, 0x00]))
@@ -833,18 +845,24 @@ def read_dht20():
     temp = (((data[3] & 0x0F) << 16) | (data[4] << 8) | data[5]) / 1048576 * 200 - 50
     return round(temp, 1), round(humi, 1)
 
-def read_scd41():
-    # 데이터 읽기 (주기 측정 모드에서 자동 갱신됨)
-    i2c.writeto(scd_addr, bytes([0xEC, 0x05]))
+def read_scd30():
+    # 데이터 준비 확인
+    i2c.writeto(scd_addr, bytes([0x02, 0x02]))
     time.sleep(0.01)
-    data = i2c.readfrom(scd_addr, 9)
-    co2 = (data[0] << 8) | data[1]
-    return co2
+    ready = i2c.readfrom(scd_addr, 3)
+    if ready[1] != 1:
+        return None
+    # 측정 데이터 읽기
+    i2c.writeto(scd_addr, bytes([0x03, 0x00]))
+    time.sleep(0.01)
+    data = i2c.readfrom(scd_addr, 18)
+    co2 = struct.unpack('>f', bytes([data[0], data[1], data[3], data[4]]))[0]
+    return round(co2)
 
-# SCD41 주기 측정 시작 (한 번만 호출)
-i2c.writeto(scd_addr, bytes([0x21, 0xB1]))
-print("SCD41 준비 중... 5초 대기")
-time.sleep(5)
+# SCD30 연속 측정 시작 (한 번만 호출)
+i2c.writeto(scd_addr, bytes([0x00, 0x10, 0x00, 0x00, crc8(bytes([0x00, 0x00]))]))
+print("SCD30 준비 중... 2초 대기")
+time.sleep(2)
 
 def judge_ventilation(co2, temp, humi):
     if co2 > 1500 or temp > 30:
@@ -857,7 +875,10 @@ def judge_ventilation(co2, temp, humi):
 # ── 메인 루프 ──
 while True:
     temp, humi = read_dht20()
-    co2 = read_scd41()
+    co2 = read_scd30()
+    if co2 is None:
+        time.sleep(2)
+        continue
     status, need_vent = judge_ventilation(co2, temp, humi)
 
     # OLED 대시보드
@@ -895,7 +916,7 @@ while True:
     oled.show()
 
     print(f"CO2:{co2}ppm T:{temp}C H:{humi}% [{status}]")
-    time.sleep(5)`,
+    time.sleep(2)`,
           pcCode: `# PC 실시간 대시보드 — 스마트 환기 시스템
 # 사용법: pip install pyserial matplotlib
 # 실행: python smart_vent_pc.py
@@ -1779,36 +1800,52 @@ plt.show()`,
         },
         {
           name: 'CO2 농도와 수업 집중도',
-          sensors: ['SCD41', 'OLED'],
+          sensors: ['SCD30', 'OLED'],
           desc: '수업 전후 CO2 변화 분석',
           code: `from machine import I2C, Pin
-import time
+import time, struct
 
 # ── 연구 설정 ──
 MEASURE_INTERVAL = 30  # 30초마다 측정
 LOG_FILE = "co2_research.csv"
 
-# ── I2C 설정 (SCD41 + OLED) ──
+# ── I2C 설정 (SCD30 + OLED) ──
 i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
-scd_addr = 0x62
+scd_addr = 0x61
 time.sleep(0.1)
 
 from ssd1306 import SSD1306_I2C
 oled = SSD1306_I2C(128, 64, i2c)
 
-def read_scd41():
-    i2c.writeto(scd_addr, bytes([0xEC, 0x05]))
-    time.sleep(0.01)
-    data = i2c.readfrom(scd_addr, 9)
-    co2 = (data[0] << 8) | data[1]
-    temp_raw = (data[3] << 8) | data[4]
-    temp = -45 + 175 * temp_raw / 65535
-    return co2, round(temp, 1)
+def crc8(data):
+    crc = 0xFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            if crc & 0x80:
+                crc = (crc << 1) ^ 0x31
+            else:
+                crc <<= 1
+            crc &= 0xFF
+    return crc
 
-# SCD41 주기 측정 시작 (한 번만 호출)
-i2c.writeto(scd_addr, bytes([0x21, 0xB1]))
-print("SCD41 준비 중... 5초 대기")
-time.sleep(5)
+def read_scd30():
+    i2c.writeto(scd_addr, bytes([0x02, 0x02]))
+    time.sleep(0.01)
+    ready = i2c.readfrom(scd_addr, 3)
+    if ready[1] != 1:
+        return None
+    i2c.writeto(scd_addr, bytes([0x03, 0x00]))
+    time.sleep(0.01)
+    data = i2c.readfrom(scd_addr, 18)
+    co2 = struct.unpack('>f', bytes([data[0], data[1], data[3], data[4]]))[0]
+    temp = struct.unpack('>f', bytes([data[6], data[7], data[9], data[10]]))[0]
+    return round(co2), round(temp, 1)
+
+# SCD30 연속 측정 시작 (한 번만 호출)
+i2c.writeto(scd_addr, bytes([0x00, 0x10, 0x00, 0x00, crc8(bytes([0x00, 0x00]))]))
+print("SCD30 준비 중... 2초 대기")
+time.sleep(2)
 
 def co2_status(co2):
     if co2 < 600:
@@ -1829,7 +1866,11 @@ co2_hist = []  # CO2 트렌드 (최대 40개)
 
 # ── 장기 데이터 수집 루프 ──
 while True:
-    co2, temp = read_scd41()
+    result = read_scd30()
+    if result is None:
+        time.sleep(2)
+        continue
+    co2, temp = result
     status = co2_status(co2)
     count += 1
     elapsed_min = time.ticks_diff(time.ticks_ms(), start) // 60000
@@ -2317,20 +2358,32 @@ setInterval(loadData, 10000);
       examples: [
         {
           name: '학교 공기질 모니터링',
-          sensors: ['SCD41', 'DHT20', 'DUST', 'OLED'],
+          sensors: ['SCD30', 'DHT20', 'DUST', 'OLED'],
           desc: 'CO2+온습도+미세먼지 통합 공기질 시스템',
           code: `from machine import I2C, Pin, ADC
-import time
+import time, struct
 
 # ── 센서 설정 ──
 i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
 dht_addr = 0x38
-scd_addr = 0x62
+scd_addr = 0x61
 dust = ADC(Pin(28))  # 미세먼지 센서 (ADC — GP28, A0/A2는 다른 센서용)
 time.sleep(0.1)
 
 from ssd1306 import SSD1306_I2C
 oled = SSD1306_I2C(128, 64, i2c)
+
+def crc8(data):
+    crc = 0xFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            if crc & 0x80:
+                crc = (crc << 1) ^ 0x31
+            else:
+                crc <<= 1
+            crc &= 0xFF
+    return crc
 
 def read_dht20():
     i2c.writeto(dht_addr, bytes([0xAC, 0x33, 0x00]))
@@ -2340,16 +2393,22 @@ def read_dht20():
     temp = (((data[3] & 0x0F) << 16) | (data[4] << 8) | data[5]) / 1048576 * 200 - 50
     return round(temp, 1), round(humi, 1)
 
-def read_scd41():
-    i2c.writeto(scd_addr, bytes([0xEC, 0x05]))
+def read_scd30():
+    i2c.writeto(scd_addr, bytes([0x02, 0x02]))
     time.sleep(0.01)
-    data = i2c.readfrom(scd_addr, 9)
-    return (data[0] << 8) | data[1]
+    ready = i2c.readfrom(scd_addr, 3)
+    if ready[1] != 1:
+        return None
+    i2c.writeto(scd_addr, bytes([0x03, 0x00]))
+    time.sleep(0.01)
+    data = i2c.readfrom(scd_addr, 18)
+    co2 = struct.unpack('>f', bytes([data[0], data[1], data[3], data[4]]))[0]
+    return round(co2)
 
-# SCD41 주기 측정 시작 (한 번만 호출)
-i2c.writeto(scd_addr, bytes([0x21, 0xB1]))
-print("SCD41 준비 중... 5초 대기")
-time.sleep(5)
+# SCD30 연속 측정 시작 (한 번만 호출)
+i2c.writeto(scd_addr, bytes([0x00, 0x10, 0x00, 0x00, crc8(bytes([0x00, 0x00]))]))
+print("SCD30 준비 중... 2초 대기")
+time.sleep(2)
 
 def read_dust():
     raw = dust.read_u16()
@@ -2382,7 +2441,10 @@ aqi_hist = []  # AQI 트렌드 (최대 40개)
 # ── 메인 루프 ──
 while True:
     temp, humi = read_dht20()
-    co2 = read_scd41()
+    co2 = read_scd30()
+    if co2 is None:
+        time.sleep(2)
+        continue
     dust_ug = read_dust()
     aqi = air_quality_index(co2, dust_ug, temp, humi)
     grade = aqi_grade(aqi)
