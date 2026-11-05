@@ -1,3 +1,5 @@
+import { guardRequest } from '../lib/requestGuard.js';
+
 export const config = {
   api: {
     bodyParser: {
@@ -11,7 +13,9 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { image, mediaType, sensorContext } = req.body;
+  if (!guardRequest(req, res, { limit: 30, maxBytes: 10_000_000 })) return;
+
+  const { image, mediaType, sensorContext } = req.body || {};
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {

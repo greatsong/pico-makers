@@ -1,3 +1,9 @@
+import { guardRequest, assertPublicHost } from '../lib/requestGuard.js';
+
+const MAX_REDIRECTS = 3;
+const MAX_HTML_BYTES = 2_000_000;
+const FETCH_TIMEOUT_MS = 8_000;
+
 // URL 유효성 검증 — SSRF 방지
 function validateUrl(rawUrl) {
   let parsed;
@@ -36,12 +42,36 @@ function validateUrl(rawUrl) {
   return parsed.href;
 }
 
+// 리다이렉트를 직접 따라가며 홉마다 주소를 다시 검사한다. 공개 주소가 내부망으로 넘기는 우회를 막는다
+async function fetchPublicHtml(startUrl) {
+  let current = startUrl;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertPublicHost(new URL(current).hostname);
+    const response = await fetch(current, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PicoHelper/1.0)' },
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const next = response.headers.get('location');
+      if (!next) throw new Error('리다이렉트 주소가 없습니다.');
+      current = validateUrl(new URL(next, current).href);
+      continue;
+    }
+    const buf = await response.arrayBuffer();
+    return Buffer.from(buf).subarray(0, MAX_HTML_BYTES).toString('utf8');
+  }
+  throw new Error('리다이렉트가 너무 많습니다.');
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { url } = req.body;
+  if (!guardRequest(req, res, { limit: 30, maxBytes: 5_000 })) return;
+
+  const { url } = req.body || {};
 
   // URL 검증
   let validatedUrl;
@@ -52,10 +82,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch(validatedUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PicoHelper/1.0)' },
-    });
-    const html = await response.text();
+    const html = await fetchPublicHtml(validatedUrl);
 
     const textContent = html
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
