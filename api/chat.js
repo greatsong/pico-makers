@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   if (!guardRequest(req, res)) return;
 
   const { messages, system } = req.body || {};
-  if (!Array.isArray(messages) || messages.length === 0 || messages.length > 100) {
+  if (!Array.isArray(messages) || messages.length === 0 || messages.length > 400) {
     return res.status(400).json({ error: '메시지 형식이 올바르지 않습니다.' });
   }
 
