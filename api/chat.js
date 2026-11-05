@@ -1,11 +1,17 @@
 import { streamClaudeResponse } from '../lib/claudeStream.js';
+import { guardRequest } from '../lib/requestGuard.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { messages, system } = req.body;
+  if (!guardRequest(req, res)) return;
+
+  const { messages, system } = req.body || {};
+  if (!Array.isArray(messages) || messages.length === 0 || messages.length > 400) {
+    return res.status(400).json({ error: '메시지 형식이 올바르지 않습니다.' });
+  }
 
   try {
     await streamClaudeResponse({ messages, system }, res);

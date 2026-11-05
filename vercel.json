@@ -4,8 +4,9 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    { "source": "/api/chat", "destination": "/api/chat" },
-    { "source": "/api/fetch-url", "destination": "/api/fetch-url" },
-    { "source": "/api/analyze-image", "destination": "/api/analyze-image" }
+    {
+      "source": "/api/chat",
+      "destination": "/api/chat"
+    }
   ]
 }
